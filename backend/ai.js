@@ -15,9 +15,10 @@ const appendHistory = (userId, role, content) => {
   }
 };
 
+
 function setupChatbotRoutes(app) {
   // Init Gemini LLM
-  const llm = new ChatGoogleGenerativeAI({
+  const llm = new langchain.ChatGoogleGenerativeAI({
     model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
     temperature: 0.3,
     apiKey: process.env.GOOGLE_API_KEY,
@@ -67,5 +68,7 @@ Assistant:
     }
   });
 }
+
+module.exports = {setupChatbotRoutes}
 
 module.exports = { setupChatbotRoutes };

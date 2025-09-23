@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiService, LoginRequest } from "@/services/api";
 
 interface LoginFormData {
   email: string;
@@ -14,46 +15,79 @@ interface LoginFormData {
 }
 
 export default function LoginPage() {
-  const [formData, setFormData] = useState<LoginFormData>({ email: "", password: "" });
+  const [formData, setFormData] = useState<LoginFormData>({ 
+    email: "", 
+    password: "" 
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // Add this helper function at the top of the component
+  const getErrorMessage = (error: unknown): string => {
+    if (error && typeof error === 'object') {
+      if ('message' in error && typeof error.message === 'string') {
+        return error.message;
+      }
+      if ('errors' in error && Array.isArray(error.errors) && error.errors[0]?.msg) {
+        return error.errors[0].msg;
+      }
+    }
+    return "An unexpected error occurred. Please try again.";
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    setError("");
+    if (error) setError("");
+  };
+
+  const validateForm = (): boolean => {
+    if (!formData.email.trim()) {
+      setError("Email is required");
+      return false;
+    }
+    if (!formData.password.trim()) {
+      setError("Password is required");
+      return false;
+    }
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!validateForm()) return;
+    
     setIsLoading(true);
     setError("");
 
     try {
-      // Mock authentication - In real app, use Supabase Auth
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const loginData: LoginRequest = {
+        email: formData.email,
+        password: formData.password,
+      };
+
+      const response = await apiService.login(loginData);
       
-      if (formData.email && formData.password) {
-        // Mock user roles for demo
-        const role = formData.email.includes("manager") ? "manager" : "employee";
-        
-        localStorage.setItem("auth_token", "mock_jwt_token");
-        localStorage.setItem("user_role", role);
-        localStorage.setItem("user_email", formData.email);
-        
-        toast({
-          title: "Login successful",
-          description: `Welcome back! Logged in as ${role}`,
-        });
-        
-        navigate("/dashboard");
-      } else {
-        setError("Please enter valid credentials");
-      }
-    } catch (err) {
-      setError("Login failed. Please try again.");
+      // Store authentication data
+      localStorage.setItem("auth_token", response.token);
+      localStorage.setItem("user_role", response.user.role);
+      localStorage.setItem("user_email", response.user.email);
+      localStorage.setItem("user_name", response.user.name);
+      localStorage.setItem("user_department", response.user.department);
+      localStorage.setItem("user_id", response.user.id);
+      
+      toast({
+        title: "Login successful",
+        description: `Welcome back, ${response.user.name}! Logged in as ${response.user.role}`,
+      });
+      
+      navigate("/dashboard");
+    } catch (err: unknown) {
+      console.error("Login error:", err);
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -89,6 +123,7 @@ export default function LoginPage() {
                   placeholder="Enter your email"
                   value={formData.email}
                   onChange={handleInputChange}
+                  disabled={isLoading}
                   required
                 />
               </div>
@@ -102,6 +137,7 @@ export default function LoginPage() {
                   placeholder="Enter your password"
                   value={formData.password}
                   onChange={handleInputChange}
+                  disabled={isLoading}
                   required
                 />
               </div>
@@ -112,7 +148,7 @@ export default function LoginPage() {
                 disabled={isLoading}
               >
                 {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                Sign In
+                {isLoading ? "Signing In..." : "Sign In"}
               </Button>
               
               <div className="text-center">
@@ -122,13 +158,6 @@ export default function LoginPage() {
                     Sign up here
                   </Link>
                 </p>
-              </div>
-              
-              <div className="mt-6 p-4 bg-muted/50 rounded-lg">
-                <p className="text-xs text-muted-foreground mb-2">Demo Accounts:</p>
-                <p className="text-xs"><strong>Manager:</strong> manager@company.com</p>
-                <p className="text-xs"><strong>Employee:</strong> employee@company.com</p>
-                <p className="text-xs">Password: anything</p>
               </div>
             </form>
           </CardContent>

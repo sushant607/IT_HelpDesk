@@ -4,16 +4,35 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, UserPlus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiService, RegisterRequest } from "@/services/api";
 
 interface SignupFormData {
   name: string;
   email: string;
   password: string;
   confirmPassword: string;
+  department: string;
+  role: string;
 }
+
+const DEPARTMENTS = [
+  'support team A',
+  'software team',
+  'network team',
+  'infrastructure team',
+  'hardware team',
+  'database team'
+];
+
+const ROLES = [
+  { value: 'employee', label: 'Employee' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'admin', label: 'Admin' }
+];
 
 export default function SignupPage() {
   const [formData, setFormData] = useState<SignupFormData>({
@@ -21,25 +40,48 @@ export default function SignupPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    department: "",
+    role: "employee",
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const getErrorMessage = (error: unknown): string => {
+    if (error && typeof error === 'object') {
+      if ('message' in error && typeof error.message === 'string') {
+        return error.message;
+      }
+      if ('errors' in error && Array.isArray(error.errors) && error.errors[0]?.msg) {
+        return error.errors[0].msg;
+      }
+    }
+    return "An unexpected error occurred. Please try again.";
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    setError("");
+    if (error) setError("");
   };
 
-  const validateForm = () => {
+  const handleSelectChange = (name: string, value: string) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (error) setError("");
+  };
+
+  const validateForm = (): boolean => {
     if (!formData.name.trim()) {
       setError("Name is required");
       return false;
     }
     if (!formData.email.trim()) {
       setError("Email is required");
+      return false;
+    }
+    if (!formData.department) {
+      setError("Department is required");
       return false;
     }
     if (formData.password.length < 6) {
@@ -62,23 +104,33 @@ export default function SignupPage() {
     setError("");
 
     try {
-      // Mock signup - In real app, use Supabase Auth
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const registerData: RegisterRequest = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+        department: formData.department,
+      };
+
+      const response = await apiService.register(registerData);
       
-      // Default role for new signups is employee
-      localStorage.setItem("auth_token", "mock_jwt_token");
-      localStorage.setItem("user_role", "employee");
-      localStorage.setItem("user_email", formData.email);
-      localStorage.setItem("user_name", formData.name);
+      // Store authentication data
+      localStorage.setItem("auth_token", response.token);
+      localStorage.setItem("user_role", response.user.role);
+      localStorage.setItem("user_email", response.user.email);
+      localStorage.setItem("user_name", response.user.name);
+      localStorage.setItem("user_department", response.user.department);
+      localStorage.setItem("user_id", response.user.id);
       
       toast({
         title: "Account created successfully",
-        description: "Welcome to IT Helpdesk!",
+        description: `Welcome to IT Helpdesk, ${response.user.name}!`,
       });
       
       navigate("/dashboard");
-    } catch (err) {
-      setError("Signup failed. Please try again.");
+    } catch (err: unknown) {
+      console.error("Registration error:", err);
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -94,7 +146,7 @@ export default function SignupPage() {
             </div>
             <CardTitle className="text-2xl font-bold">Create Account</CardTitle>
             <CardDescription>
-              Sign up as an employee to get started
+              Join the IT Helpdesk team
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -114,6 +166,7 @@ export default function SignupPage() {
                   placeholder="Enter your full name"
                   value={formData.name}
                   onChange={handleInputChange}
+                  disabled={isLoading}
                   required
                 />
               </div>
@@ -127,8 +180,49 @@ export default function SignupPage() {
                   placeholder="Enter your email"
                   value={formData.email}
                   onChange={handleInputChange}
+                  disabled={isLoading}
                   required
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="department">Department</Label>
+                <Select 
+                  value={formData.department} 
+                  onValueChange={(value) => handleSelectChange('department', value)}
+                  disabled={isLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select your department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEPARTMENTS.map((dept) => (
+                      <SelectItem key={dept} value={dept}>
+                        {dept.charAt(0).toUpperCase() + dept.slice(1)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="role">Role</Label>
+                <Select 
+                  value={formData.role} 
+                  onValueChange={(value) => handleSelectChange('role', value)}
+                  disabled={isLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select your role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROLES.map((role) => (
+                      <SelectItem key={role.value} value={role.value}>
+                        {role.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               
               <div className="space-y-2">
@@ -137,9 +231,10 @@ export default function SignupPage() {
                   id="password"
                   name="password"
                   type="password"
-                  placeholder="Create a password"
+                  placeholder="Create a password (min 6 characters)"
                   value={formData.password}
                   onChange={handleInputChange}
+                  disabled={isLoading}
                   required
                 />
               </div>
@@ -153,6 +248,7 @@ export default function SignupPage() {
                   placeholder="Confirm your password"
                   value={formData.confirmPassword}
                   onChange={handleInputChange}
+                  disabled={isLoading}
                   required
                 />
               </div>
@@ -163,7 +259,7 @@ export default function SignupPage() {
                 disabled={isLoading}
               >
                 {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                Create Account
+                {isLoading ? "Creating Account..." : "Create Account"}
               </Button>
               
               <div className="text-center">
