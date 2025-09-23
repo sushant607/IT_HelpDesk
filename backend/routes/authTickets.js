@@ -110,7 +110,7 @@ router.post('/', authenticate, async (req, res) => {
       if (!title || !priority) {
         return res.status(400).json({ msg: 'title and priority required' });
       }
-  
+      console.log("hehe")
       // Target user (defaults to self)
       const targetUserId = createdForUserId || req.user.id;
   
@@ -147,7 +147,7 @@ router.post('/', authenticate, async (req, res) => {
       if (!assigneeExists) {
         return res.status(400).json({ msg: 'assignee not found' });
       }
-  
+      console.log("hi")
       // Create ticket (Model.create triggers save middleware)
       const doc = await Ticket.create({
         title,
@@ -158,7 +158,7 @@ router.post('/', authenticate, async (req, res) => {
         department: targetUser.department,
         status: 'open',
       });
-  
+      console.log(doc)
       return res.status(201).json({
         ticket_id: doc._id,
         message: 'Ticket created and assigned successfully',

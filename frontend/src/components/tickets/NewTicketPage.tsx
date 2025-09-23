@@ -59,39 +59,39 @@ export default function NewTicketPage() {
     "Other"
   ];
 
-  // Pre-fill department; load department employees for manager/admin
-  useEffect(() => {
-    if (userDept) {
-      setFormData(prev => ({ ...prev, department: userDept }));
-    }
-    if ((userRole === "manager" || userRole === "admin") && userDept) {
-      const loadDeptEmployees = async () => {
-        try {
-          setLoadingEmployees(true);
-          setError("");
-          // Use an existing users endpoint you already have. If your backend returns { users: [...] },
-          // the parsing below handles both array and object-wrapped array.
-          const url = `http://localhost:5000/api/users?department=${encodeURIComponent(userDept)}&role=employee`;
-          const res = await fetch(url, {
-            headers: { Authorization: token ? `Bearer ${token}` : "" },
-          });
-          const txt = await res.text();
-          let data: unknown;
-          try { data = JSON.parse(txt); } catch { data = txt; }
-          if (!res.ok) throw new Error(typeof data === "string" ? data : (data as any)?.msg || "Failed to load employees");
+  // // Pre-fill department; load department employees for manager/admin
+  // useEffect(() => {
+  //   if (userDept) {
+  //     setFormData(prev => ({ ...prev, department: userDept }));
+  //   }
+  //   if ((userRole === "manager" || userRole === "admin") && userDept) {
+  //     const loadDeptEmployees = async () => {
+  //       try {
+  //         setLoadingEmployees(true);
+  //         setError("");
+  //         // Use an existing users endpoint you already have. If your backend returns { users: [...] },
+  //         // the parsing below handles both array and object-wrapped array.
+  //         const url = `http://localhost:5000/api/users?department=${encodeURIComponent(userDept)}&role=employee`;
+  //         const res = await fetch(url, {
+  //           headers: { Authorization: token ? `Bearer ${token}` : "" },
+  //         });
+  //         const txt = await res.text();
+  //         let data: unknown;
+  //         try { data = JSON.parse(txt); } catch { data = txt; }
+  //         if (!res.ok) throw new Error(typeof data === "string" ? data : (data as any)?.msg || "Failed to load employees");
 
-          const list = Array.isArray(data) ? data : Array.isArray((data as any)?.users) ? (data as any).users : [];
-          setDeptEmployees((list as DeptUser[]).filter(u => u.role === "employee"));
-        } catch (e: any) {
-          setError(e.message || "Failed to load employees");
-          setDeptEmployees([]);
-        } finally {
-          setLoadingEmployees(false);
-        }
-      };
-      loadDeptEmployees();
-    }
-  }, [userRole, userDept, token]);
+  //         const list = Array.isArray(data) ? data : Array.isArray((data as any)?.users) ? (data as any).users : [];
+  //         setDeptEmployees((list as DeptUser[]).filter(u => u.role === "employee"));
+  //       } catch (e: any) {
+  //         setError(e.message || "Failed to load employees");
+  //         setDeptEmployees([]);
+  //       } finally {
+  //         setLoadingEmployees(false);
+  //       }
+  //     };
+  //     loadDeptEmployees();
+  //   }
+  // }, [userRole, userDept, token]);
 
   const handleInputChange = (field: keyof TicketFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -111,10 +111,10 @@ export default function NewTicketPage() {
       setError("Please select a department");
       return false;
     }
-    if ((userRole === "manager" || userRole === "admin") && !formData.assignee) {
-      setError("Please select an assignee from your department");
-      return false;
-    }
+    // if ((userRole === "manager" || userRole === "admin") && !formData.assignee) {
+    //   setError("Please select an assignee from your department");
+    //   return false;
+    // }
     return true;
   };
 
@@ -135,7 +135,7 @@ export default function NewTicketPage() {
         createdForUserId: userId,
       };
       if (userRole === "manager" || userRole === "admin") {
-        payload.assignedTo = formData.assignee;
+        payload.assignedTo ='68d2a2fef8a04c067b7b7c27';
       }
 
       const res = await fetch("http://localhost:5000/api/tickets", {
