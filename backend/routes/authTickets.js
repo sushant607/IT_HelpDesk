@@ -132,6 +132,7 @@ router.post('/', authenticate, async (req, res) => {
       if (!allowed) {
         return res.status(403).json({ msg: reason });
       }
+      console.log("booo");
   
       // Validate target user and get department
       const targetUser = await User.findById(targetUserId).select('department');

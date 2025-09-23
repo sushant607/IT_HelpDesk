@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Bot, User, Send, Loader2, Ticket } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiService } from "@/services/api";
 
 interface ChatMessage {
   id: string;
@@ -141,17 +142,15 @@ Is there anything else I can help you with today?`,
     setIsLoading(true);
 
     // Simulate AI processing delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const intent = detectIntent(input);
-    const { content, ticketId } = generateBotResponse(intent, input);
+    const response = await apiService.chatMessage({message: input});
+    console.log(response.reply);
+    const ticketId = '';
 
     const botMessage: ChatMessage = {
       id: `bot-${Date.now()}`,
-      content,
+      content: response.reply,
       sender: "bot",
       timestamp: new Date(),
-      ticketId,
     };
 
     setMessages(prev => [...prev, botMessage]);

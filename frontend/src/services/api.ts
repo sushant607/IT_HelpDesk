@@ -25,6 +25,16 @@ export interface AuthResponse {
   };
 }
 
+export interface ChatRequest {
+  message: string;
+};
+
+export interface ChatResponse {
+  reply: string;
+  toolUsed?: string;
+  timestamp?: string;
+};
+
 export interface ErrorResponse {
   errors: Array<{ msg: string }>;
 }
@@ -98,6 +108,13 @@ class ApiService {
   async healthCheck(): Promise<{ status: string }> {
     return this.makeRequest<{ status: string }>('/health');
   }
+
+  async chatMessage(chatMessage: ChatRequest): Promise<ChatResponse> {
+    return this.makeRequest<ChatResponse> ('/ai-chat', {
+      method: 'POST',
+      body: JSON.stringify(chatMessage)
+    });
+  } 
 }
 
 export const apiService = new ApiService();

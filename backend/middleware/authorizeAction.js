@@ -30,9 +30,12 @@ function canAccessTeamScope(req) {
 async function canCreateTicket(req, createdForUserId, assignedToUserId) {
   const { role, department, id: creatorId } = req.user;
   
+  const createdForUser = await User.findById(createdForUserId).select('department');
+  console.log(department);
   // Employee restrictions
   if (role === 'employee') {
     // Must create for self only
+    
     if (createdForUserId !== creatorId) {
       return { allowed: false, reason: 'Employees can only create tickets for themselves' };
     }
@@ -40,16 +43,19 @@ async function canCreateTicket(req, createdForUserId, assignedToUserId) {
     if (assignedToUserId !== creatorId) {
       return { allowed: false, reason: 'Employees must assign tickets to themselves' };
     }
+    if (createdForUser.department !== req.body.department) {
+      return { allowed: false, reason: 'Cannot create tickets for users outside your department' };
+    }
     return { allowed: true };
   }
 
   // Manager/Admin restrictions
   if (role === 'manager' || role === 'admin') {
     // Verify createdFor user exists and is in same department
-    const createdForUser = await User.findById(createdForUserId).select('department');
     if (!createdForUser) {
       return { allowed: false, reason: 'Created-for user not found' };
     }
+    console.log('Hi'+ createdForUser.department);
     if (createdForUser.department !== department) {
       return { allowed: false, reason: 'Cannot create tickets for users outside your department' };
     }
