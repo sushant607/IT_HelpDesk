@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,22 +15,37 @@ interface TicketFormData {
   description: string;
   department: string;
   priority: "low" | "medium" | "high" | "urgent";
-  assignee?: string;
+  assignee?: string; // employee userId for manager/admin
 }
+
+type DeptUser = {
+  _id: string;
+  name: string;
+  email: string;
+  role: "employee" | "manager" | "admin";
+  department?: string;
+};
 
 export default function NewTicketPage() {
   const [formData, setFormData] = useState<TicketFormData>({
     title: "",
     description: "",
-    department:"",
+    department: "",
     priority: "medium",
-    assignee: "unassigned",
+    assignee: undefined,
   });
+  const [deptEmployees, setDeptEmployees] = useState<DeptUser[]>([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
-  const userRole = localStorage.getItem("user_role");
+
+  // Read role/department/id/token from localStorage as requested
+  const token = localStorage.getItem("auth_token") || "";
+  const userRole = localStorage.getItem("user_role") || "employee";
+  const userId = localStorage.getItem("user_id") || "";
+  const userDept = localStorage.getItem("user_department") || "";
 
   const departments = [
     "Account Access",
@@ -44,22 +59,45 @@ export default function NewTicketPage() {
     "Other"
   ];
 
-  const teamMembers = [
-    "John Doe",
-    "Jane Smith", 
-    "Bob Wilson",
-    "Sarah Johnson",
-    "Mike Chen",
-    "Lisa Park",
-    "Alex Rodriguez",
-    "Emma Thompson"
-  ];
+  // Pre-fill department; load department employees for manager/admin
+  useEffect(() => {
+    if (userDept) {
+      setFormData(prev => ({ ...prev, department: userDept }));
+    }
+    if ((userRole === "manager" || userRole === "admin") && userDept) {
+      const loadDeptEmployees = async () => {
+        try {
+          setLoadingEmployees(true);
+          setError("");
+          // Use an existing users endpoint you already have. If your backend returns { users: [...] },
+          // the parsing below handles both array and object-wrapped array.
+          const url = `http://localhost:5000/api/users?department=${encodeURIComponent(userDept)}&role=employee`;
+          const res = await fetch(url, {
+            headers: { Authorization: token ? `Bearer ${token}` : "" },
+          });
+          const txt = await res.text();
+          let data: unknown;
+          try { data = JSON.parse(txt); } catch { data = txt; }
+          if (!res.ok) throw new Error(typeof data === "string" ? data : (data as any)?.msg || "Failed to load employees");
+
+          const list = Array.isArray(data) ? data : Array.isArray((data as any)?.users) ? (data as any).users : [];
+          setDeptEmployees((list as DeptUser[]).filter(u => u.role === "employee"));
+        } catch (e: any) {
+          setError(e.message || "Failed to load employees");
+          setDeptEmployees([]);
+        } finally {
+          setLoadingEmployees(false);
+        }
+      };
+      loadDeptEmployees();
+    }
+  }, [userRole, userDept, token]);
 
   const handleInputChange = (field: keyof TicketFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     setError("");
   };
-  console.log(formData);
+
   const validateForm = () => {
     if (!formData.title.trim()) {
       setError("Title is required");
@@ -73,53 +111,67 @@ export default function NewTicketPage() {
       setError("Please select a department");
       return false;
     }
+    if ((userRole === "manager" || userRole === "admin") && !formData.assignee) {
+      setError("Please select an assignee from your department");
+      return false;
+    }
     return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
+    e.preventDefault();
+    if (!validateForm()) return;
 
-  if (!validateForm()) return;
+    setIsLoading(true);
+    setError("");
 
-  setIsLoading(true);
-  setError("");
+    try {
+      // Build payload: backend derives department from createdForUserId target user;
+      // employees are self-assigned server-side; managers/admins must include assignedTo
+      const payload: any = {
+        title: formData.title,
+        description: formData.description,
+        priority: formData.priority,
+        createdForUserId: userId,
+      };
+      if (userRole === "manager" || userRole === "admin") {
+        payload.assignedTo = formData.assignee;
+      }
 
-  try {
-    const token = localStorage.getItem("auth_token");
-   //console.log(token);
-    const res = await fetch("http://localhost:5000/api/tickets", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(formData), // send form data
-    });
+      const res = await fetch("http://localhost:5000/api/tickets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify(payload),
+      });
 
-    if (!res.ok) {
-      throw new Error("Failed to create ticket");
+      const txt = await res.text();
+      let data: any;
+      try { data = JSON.parse(txt); } catch { data = txt; }
+
+      if (!res.ok) {
+        throw new Error(typeof data === "string" ? data : (data?.msg || "Failed to create ticket"));
+      }
+
+      const ticketId = data?.ticket_id || data?._id || "created";
+      toast({
+        title: "Ticket created successfully!",
+        description: `Ticket ${ticketId} has been created.`,
+      });
+
+      if (userRole === "manager" || userRole === "admin") {
+        navigate("/dashboard/all-tickets");
+      } else {
+        navigate("/dashboard/tickets");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to create ticket. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
-
-    const newTicket = await res.json();
-
-    toast({
-      title: "Ticket created successfully!",
-      description: `Ticket ${newTicket._id} has been created.`,
-    });
-
-    // Navigate back
-    if (userRole === "manager") {
-      navigate("/dashboard/all-tickets");
-    } else {
-      navigate("/dashboard/tickets");
-    }
-  } catch (err) {
-    setError("Failed to create ticket. Please try again.");
-  } finally {
-    setIsLoading(false);
-  }
-};
-
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -155,132 +207,132 @@ export default function NewTicketPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {/* Title */}
-            <div className="space-y-2">
-              <Label htmlFor="title">Title *</Label>
-              <Input
-                id="title"
-                placeholder="Brief description of the issue"
-                value={formData.title}
-                onChange={(e) => handleInputChange("title", e.target.value)}
-                required
-              />
-            </div>
-
-            {/* Description */}
-            <div className="space-y-2">
-              <Label htmlFor="description">Description *</Label>
-              <Textarea
-                id="description"
-                placeholder="Detailed description of the issue, including steps to reproduce, error messages, and any other relevant information..."
-                value={formData.description}
-                onChange={(e) => handleInputChange("description", e.target.value)}
-                rows={5}
-                required
-              />
-            </div>
-
-            {/* Category and Priority Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="department">Department *</Label>
-                <Select
-                  value={formData.department}
-                  onValueChange={(value) => handleInputChange("department", value)}
-                  required
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a department" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {departments.map(department => (
-                      <SelectItem key={department} value={department}>
-                        {department}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="priority">Priority</Label>
-                <Select
-                  value={formData.priority}
-                  onValueChange={(value) => handleInputChange("priority", value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Manager-only fields */}
-            {userRole === "manager" && (
-              <div className="space-y-2">
-                <Label htmlFor="assignee">Assign To</Label>
-                <Select
-                  value={formData.assignee}
-                  onValueChange={(value) => handleInputChange("assignee", value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select team member (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">Unassigned</SelectItem>
-                    {teamMembers.map(member => (
-                      <SelectItem key={member} value={member}>
-                        {member}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Submit Button */}
-            <div className="flex justify-end gap-3 pt-6 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => navigate(-1)}
-                disabled={isLoading}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isLoading}
-                className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Creating Ticket...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4 mr-2" />
-                    Create Ticket
-                  </>
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
                 )}
-              </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+
+                {/* Title */}
+                <div className="space-y-2">
+                  <Label htmlFor="title">Title *</Label>
+                  <Input
+                    id="title"
+                    placeholder="Brief description of the issue"
+                    value={formData.title}
+                    onChange={(e) => handleInputChange("title", e.target.value)}
+                    required
+                  />
+                </div>
+
+                {/* Description */}
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description *</Label>
+                  <Textarea
+                    id="description"
+                    placeholder="Detailed description of the issue, including steps to reproduce, error messages, and any other relevant information..."
+                    value={formData.description}
+                    onChange={(e) => handleInputChange("description", e.target.value)}
+                    rows={5}
+                    required
+                  />
+                </div>
+
+                {/* Category and Priority Row */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="department">Department *</Label>
+                    <Select
+                      value={formData.department}
+                      onValueChange={(value) => handleInputChange("department", value)}
+                      required
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {departments.map(department => (
+                          <SelectItem key={department} value={department}>
+                            {department}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="priority">Priority</Label>
+                    <Select
+                      value={formData.priority}
+                      onValueChange={(value) => handleInputChange("priority", value as any)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Manager/Admin: Assign To within department */}
+                {(userRole === "manager" || userRole === "admin") && (
+                  <div className="space-y-2">
+                    <Label htmlFor="assignee">Assign To (department employees)</Label>
+                    <Select
+                      value={formData.assignee}
+                      onValueChange={(value) => handleInputChange("assignee", value)}
+                      disabled={loadingEmployees}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={loadingEmployees ? "Loading..." : "Select team member"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {deptEmployees.map(member => (
+                          <SelectItem key={member._id} value={member._id}>
+                            {member.name} ({member.email})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Submit Button */}
+                <div className="flex justify-end gap-3 pt-6 border-t">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => navigate(-1)}
+                    disabled={isLoading}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isLoading}
+                    className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Creating Ticket...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 mr-2" />
+                        Create Ticket
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right side - Illustration */}

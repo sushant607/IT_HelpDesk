@@ -16,6 +16,7 @@ interface TicketData {
   priority: "low" | "medium" | "high" | "urgent";
   createdAt: string;
   updatedAt: string;
+  createdByName?: string;
 }
 
 export default function MyTicketsPage() {
@@ -26,50 +27,94 @@ export default function MyTicketsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const navigate = useNavigate();
 
-
   useEffect(() => {
-    const fetchTickets = async () => {
+    const fetchAssigned = async () => {
       try {
         const token = localStorage.getItem("auth_token");
-        //console.log(token);
-        const res = await fetch("http://localhost:5000/api/tickets?scope=me", {
+        // Option A: use dedicated assigned route
+        // const url = "http://localhost:5000/api/tickets/assigned";
+        // Option B: use a query on the list route (server should interpret scope=me)
+        const url = "http://localhost:5000/api/tickets?scope=me";
+
+        const res = await fetch(url, {
           headers: {
-            Authorization: Bearer ${token},
+            "Content-Type": "application/json",
+            Authorization: token ? `Bearer ${token}` : "",
           },
         });
-        console.log(res);
-        const data: TicketData[] = await res.json();
-        setTickets(data.tickets || []);
-        setFilteredTickets(data.tickets || []);
 
-      } catch (error) {
-        console.error("Error fetching tickets", error);
+        const txt = await res.text();
+        let data: unknown;
+        try {
+          data = JSON.parse(txt);
+        } catch {
+          data = txt;
+        }
+
+        if (!res.ok) {
+          const msg =
+            typeof data === "string" ? data : (data as any)?.msg || `Request failed with ${res.status}`;
+          throw new Error(msg);
+        }
+
+        // Accept either array or { tickets: [...] }
+        let list: any[] | null = null;
+        if (Array.isArray(data)) {
+          list = data;
+        } else if (data && typeof data === "object" && Array.isArray((data as any).tickets)) {
+          list = (data as any).tickets;
+        }
+
+        if (!list) {
+          console.error("Unexpected payload for tickets:", data);
+          setTickets([]);
+          setFilteredTickets([]);
+          return;
+        }
+
+        const mapped: TicketData[] = list.map((t: any) => ({
+          id: t._id,
+          title: t.title,
+          description: t.description ?? "",
+          category: t.department ?? "General",
+          status: t.status === "in_progress" ? "in-progress" : t.status,
+          priority: t.priority,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          createdByName: t?.createdBy?.name || undefined,
+        }));
+
+        setTickets(mapped);
+        setFilteredTickets(mapped);
+      } catch (e) {
+        console.error("Failed to load assigned tickets:", e);
+        setTickets([]);
+        setFilteredTickets([]);
       }
     };
-
-    fetchTickets();
+    fetchAssigned();
   }, []);
 
   useEffect(() => {
     let filtered = tickets;
 
-    // Search filter
     if (searchQuery) {
-      filtered = filtered.filter(ticket =>
-        ticket.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ticket.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ticket.category.toLowerCase().includes(searchQuery.toLowerCase())
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (ticket) =>
+          ticket.title.toLowerCase().includes(q) ||
+          ticket.description.toLowerCase().includes(q) ||
+          ticket.category.toLowerCase().includes(q) ||
+          (ticket.createdByName?.toLowerCase().includes(q) ?? false)
       );
     }
 
-    // Status filter
     if (statusFilter !== "all") {
-      filtered = filtered.filter(ticket => ticket.status === statusFilter);
+      filtered = filtered.filter((ticket) => ticket.status === statusFilter);
     }
 
-    // Category filter
     if (categoryFilter !== "all") {
-      filtered = filtered.filter(ticket => ticket.category === categoryFilter);
+      filtered = filtered.filter((ticket) => ticket.category === categoryFilter);
     }
 
     setFilteredTickets(filtered);
@@ -77,21 +122,31 @@ export default function MyTicketsPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "open": return "bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full";
-      case "in-progress": return "bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-full";
-      case "resolved": return "bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-full";
-      case "closed": return "bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded-full";
-      default: return "bg-muted px-3 py-1 rounded-full";
+      case "open":
+        return "bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full";
+      case "in-progress":
+        return "bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-full";
+      case "resolved":
+        return "bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-full";
+      case "closed":
+        return "bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded-full";
+      default:
+        return "bg-muted px-3 py-1 rounded-full";
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case "low": return "border-l-muted";
-      case "medium": return "border-l-primary";
-      case "high": return "border-l-warning";
-      case "urgent": return "border-l-destructive";
-      default: return "border-l-muted";
+      case "low":
+        return "border-l-muted";
+      case "medium":
+        return "border-l-primary";
+      case "high":
+        return "border-l-warning";
+      case "urgent":
+        return "border-l-destructive";
+      default:
+        return "border-l-muted";
     }
   };
 
@@ -103,14 +158,9 @@ export default function MyTicketsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">My Tickets</h1>
-          <p className="text-muted-foreground mt-2">
-            Track and manage your support requests
-          </p>
+          <p className="text-muted-foreground mt-2">Track and manage your support requests</p>
         </div>
-        <Button
-          onClick={() => navigate("/tickets/new")}
-          className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
-        >
+        <Button onClick={() => navigate("/tickets/new")} className="bg-gradient-primary hover:shadow-glow transition-all duration-300">
           <Plus className="w-4 h-4 mr-2" />
           Create Ticket
         </Button>
@@ -157,7 +207,7 @@ export default function MyTicketsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                {categories.map(category => (
+                {categories.map((category) => (
                   <SelectItem key={category} value={category}>
                     {category}
                   </SelectItem>
@@ -181,23 +231,21 @@ export default function MyTicketsPage() {
           </Card>
         ) : (
           filteredTickets.map((ticket) => (
-            <Card key={ticket.id} className={bg-gradient-card border-0 shadow-md border-l-4 ${getPriorityColor(ticket.priority)} hover:shadow-lg transition-all duration-200}>
+            <Card key={ticket.id} className={`bg-gradient-card border-0 shadow-md border-l-4 ${getPriorityColor(ticket.priority)} hover:shadow-lg transition-all duration-200`}>
               <CardContent className="p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="font-semibold text-lg">{ticket.title}</h3>
                       <Badge variant="outline" className="text-xs">
-                        {ticket.id}
+                        {ticket.createdByName ? `Created by: ${ticket.createdByName}` : ticket.id.substring(0, 8)}
                       </Badge>
-                      <Badge className={${getStatusColor(ticket.status)} text-xs}>
+                      <Badge className={`${getStatusColor(ticket.status)} text-xs`}>
                         {ticket.status.replace("-", " ").toUpperCase()}
                       </Badge>
                     </div>
 
-                    <p className="text-muted-foreground mb-4 line-clamp-2">
-                      {ticket.description}
-                    </p>
+                    <p className="text-muted-foreground mb-4 line-clamp-2">{ticket.description}</p>
 
                     <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                       <span className="flex items-center gap-1">
@@ -205,7 +253,7 @@ export default function MyTicketsPage() {
                       </span>
                       <span className="flex items-center gap-1">
                         <strong>Priority:</strong>
-                        <Badge variant="outline" className={text-xs ml-1 ${getPriorityColor(ticket.priority)}}>
+                        <Badge variant="outline" className={`text-xs ml-1 ${getPriorityColor(ticket.priority)}`}>
                           {ticket.priority}
                         </Badge>
                       </span>
@@ -219,20 +267,12 @@ export default function MyTicketsPage() {
                   </div>
 
                   <div className="flex gap-2 ml-4">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate(/dashboard/tickets/${ticket.id})}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/tickets/${ticket.id}`)}>
                       <Eye className="w-4 h-4 mr-1" />
                       View
                     </Button>
                     {ticket.status === "open" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigate(/dashboard/tickets/${ticket.id}?edit=true)}
-                      >
+                      <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/tickets/${ticket.id}?edit=true`)}>
                         <Edit className="w-4 h-4 mr-1" />
                         Edit
                       </Button>
@@ -245,8 +285,7 @@ export default function MyTicketsPage() {
         )}
       </div>
 
-      {/* Results Summary */}
-      {filteredTickets.length > 0 && (
+      {filteredTickets.length === 0 ? null : (
         <div className="text-center text-sm text-muted-foreground">
           Showing {filteredTickets.length} of {tickets.length} tickets
         </div>

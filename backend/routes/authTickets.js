@@ -13,6 +13,46 @@ const {
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
 
+// Utility: Get number of tickets assigned to a user
+async function countTicketsAssignedToUser(userId) {
+  if (!mongoose.Types.ObjectId.isValid(userId)) return 0;
+  return await Ticket.countDocuments({ assignedTo: userId });
+}
+
+// GET /api/tickets/recommend-assignees?department=
+router.get('/recommend-assignees', authenticate, async (req, res) => {
+  try {
+    const { department } = req.query || {};
+
+    // Get all users in the same department
+    const users = await User.find({ department: department.replace('+', ' ') }).select('name email role department');
+
+    // For each user, count assigned tickets
+    const userLoads = await Promise.all(users.map(async (user) => {
+      const count = await countTicketsAssignedToUser(user._id);
+      return { user, assignedCount: count };
+    }));
+
+    // Sort by assignedCount ascending
+    userLoads.sort((a, b) => a.assignedCount - b.assignedCount);
+
+    // Return top 3 users
+    const recommendations = userLoads.slice(0, 3).map(({ user, assignedCount }) => ({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      department: user.department,
+      assignedTicketCount: assignedCount
+    }));
+
+    return res.json({ recommendations });
+  } catch (e) {
+    console.error('GET /tickets/recommend-assignees error:', e);
+    return res.status(500).json({ msg: 'recommend_error' });
+  }
+});
+
 // GET /api/tickets?scope=me|team&status=&priority=&keywords=
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -64,58 +104,71 @@ router.get('/', authenticate, async (req, res) => {
 router.post('/', authenticate, async (req, res) => {
     try {
       const { title, description = '', priority, createdForUserId, assignedTo } = req.body || {};
-      
+      const role = req.user.role;
+  
+      // Basic input checks
       if (!title || !priority) {
         return res.status(400).json({ msg: 'title and priority required' });
       }
   
-      // Determine who the ticket is created for (default: self)
+      // Target user (defaults to self)
       const targetUserId = createdForUserId || req.user.id;
-      
-      // MANDATORY: assignedTo is required
-      if (!assignedTo) {
-        return res.status(400).json({ msg: 'assignedTo is required - tickets must be assigned' });
+  
+      // Determine final assignee per role policy
+      let finalAssignedTo;
+      if (role === 'employee') {
+        // Employees cannot select assignee; force to self
+        finalAssignedTo = req.user.id;
+      } else {
+        // Admin/other privileged roles must provide assignedTo
+        if (!assignedTo) {
+          return res.status(400).json({ msg: 'assignedTo is required for this role' });
+        }
+        finalAssignedTo = assignedTo;
       }
   
-      // Check creation permissions with new policy
-      const { allowed, reason } = await canCreateTicket(req, targetUserId, assignedTo);
+      // Authorization check against policy (server-side)
+      const { allowed, reason } = await canCreateTicket(req, targetUserId, finalAssignedTo);
       if (!allowed) {
         return res.status(403).json({ msg: reason });
       }
   
-      // Get target user for department context
+      // Validate target user and get department
       const targetUser = await User.findById(targetUserId).select('department');
       if (!targetUser) {
         return res.status(400).json({ msg: 'target user not found' });
       }
-  
-      // Set ticket department (always the target user's department)
-      const ticketDept = targetUser.department;
-      if (!ticketDept) {
+      if (!targetUser.department) {
         return res.status(400).json({ msg: 'target user missing department' });
       }
   
-      // Create ticket
+      // Optional: ensure assignee exists
+      const assigneeExists = await User.exists({ _id: finalAssignedTo });
+      if (!assigneeExists) {
+        return res.status(400).json({ msg: 'assignee not found' });
+      }
+  
+      // Create ticket (Model.create triggers save middleware)
       const doc = await Ticket.create({
         title,
         description,
         priority,
-        createdBy: targetUserId,
-        assignedTo,
-        department: ticketDept,
-        status: 'open', //obv
+        createdBy: targetUserId, // storing "created for" per existing field naming
+        assignedTo: finalAssignedTo,
+        department: targetUser.department,
+        status: 'open',
       });
-      console.log(doc);
-      return res.status(201).json({ 
+  
+      return res.status(201).json({
         ticket_id: doc._id,
-        message: 'Ticket created and assigned successfully'
+        message: 'Ticket created and assigned successfully',
       });
-      
     } catch (e) {
       console.error('POST /tickets error:', e);
       return res.status(500).json({ msg: 'create_error' });
     }
   });
+    
 // PATCH /api/tickets/:id
 router.patch('/:id', authenticate, async (req, res) => {
   try {
