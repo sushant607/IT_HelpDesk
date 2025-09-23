@@ -164,6 +164,7 @@ const fetchMyTicketsTool = tool(
 
       if (input.status) query.append('status', input.status);
       if (input.priority) query.append('priority', input.priority);
+      if (input.keywords?.length > 0) query.append('keywords', input.keywords.join('+'));
       
       const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
@@ -201,7 +202,8 @@ const fetchMyTicketsTool = tool(
     description: "Fetches tickets assigned to or created by the current user",
     schema: z.object({
       status: z.string().optional().describe("Filter by status: 'open', 'in_progress', 'resolved'"),
-      priority: z.string().optional().describe("Filter by priority: 'low', 'medium', 'high', 'urgent'")
+      priority: z.string().optional().describe("Filter by priority: 'low', 'medium', 'high', 'urgent'"),
+      keywords: z.array(z.string()).optional().describe("Filter by tickets having certain keywords(max 3)")
     }),
   }
 );
