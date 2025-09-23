@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const User = require('../models/User');
 
 // Role helpers
 function requireRole(...allowed) {
@@ -9,88 +10,133 @@ function requireRole(...allowed) {
   };
 }
 
-// Listing scope: employee → self only; manager/admin → department only (not beyond team)
+// Listing scope: employee → self only; manager/admin → department only
 function listScope(req) {
-    const role = req.user.role;
-    if (role === 'employee') {
-      return { createdBy: new mongoose.Types.ObjectId(req.user.id) };
-    }
-    // manager/admin: restrict to department
-    return { department: req.user.department };
-  }
-
-  function canAccessTeamScope(req) {
-    const role = req.user.role;
-    return role === 'manager' || role === 'admin';
-  }
-
-// Create permissions
-// - employee: only for itself
-// - manager/admin: can create for self or others in same department
-function canCreateFor(req, targetUserId) {
   const role = req.user.role;
   if (role === 'employee') {
-    return targetUserId === req.user.id;
+    return { createdBy: new mongoose.Types.ObjectId(req.user.id) };
   }
-  // manager/admin: allow if same department or unspecified (server will set dept)
-  return true;
+  return { department: req.user.department };
+}
+
+function canAccessTeamScope(req) {
+  const role = req.user.role;
+  return role === 'manager' || role === 'admin';
+}
+
+// NEW CREATION POLICY
+// - Employee: can only create for self (createdBy = self, assignedTo = self mandatory)
+// - Manager/Admin: can create for anyone in same department (assignedTo mandatory, must be same dept)
+async function canCreateTicket(req, createdForUserId, assignedToUserId) {
+  const { role, department, id: creatorId } = req.user;
+  
+  // Employee restrictions
+  if (role === 'employee') {
+    // Must create for self only
+    if (createdForUserId !== creatorId) {
+      return { allowed: false, reason: 'Employees can only create tickets for themselves' };
+    }
+    // Must assign to self only  
+    if (assignedToUserId !== creatorId) {
+      return { allowed: false, reason: 'Employees must assign tickets to themselves' };
+    }
+    return { allowed: true };
+  }
+
+  // Manager/Admin restrictions
+  if (role === 'manager' || role === 'admin') {
+    // Verify createdFor user exists and is in same department
+    const createdForUser = await User.findById(createdForUserId).select('department');
+    if (!createdForUser) {
+      return { allowed: false, reason: 'Created-for user not found' };
+    }
+    if (createdForUser.department !== department) {
+      return { allowed: false, reason: 'Cannot create tickets for users outside your department' };
+    }
+
+    // Verify assignedTo user exists and is in same department
+    const assignedToUser = await User.findById(assignedToUserId).select('department');
+    if (!assignedToUser) {
+      return { allowed: false, reason: 'Assigned-to user not found' };
+    }
+    if (assignedToUser.department !== department) {
+      return { allowed: false, reason: 'Cannot assign tickets to users outside your department' };
+    }
+
+    return { allowed: true };
+  }
+
+  return { allowed: false, reason: 'Invalid role' };
 }
 
 // Update permissions
-// - employee: only if creator and only own ticket
-// - manager/admin: may edit tickets in same department; not beyond department
 async function canUpdate(req, ticket) {
-  if (!ticket) return false;
-  if (req.user.role === 'employee') {
-    return String(ticket.createdBy) === req.user.id;
+  const { role, department, id: userId } = req.user;
+  
+  if (role === 'employee') {
+    // Can update only if creator or assignee
+    const isCreator = ticket.createdBy && ticket.createdBy.toString() === userId;
+    const isAssignee = ticket.assignedTo && ticket.assignedTo.toString() === userId;
+    return isCreator || isAssignee;
   }
-  // Managers/admins limited to their department
-  return ticket.department === req.user.department;
+  
+  if (role === 'manager' || role === 'admin') {
+    // Can update tickets in same department
+    return ticket.department === department;
+  }
+  
+  return false;
 }
 
 // Delete permissions
-// - employee: only if creator (self-delete)
-// - manager/admin: allowed within same department
 async function canDelete(req, ticket) {
-  if (!ticket) return false;
-  if (req.user.role === 'employee') {
-    return String(ticket.createdBy) === req.user.id;
+  const { role, department, id: userId } = req.user;
+  
+  if (role === 'employee') {
+    // Can delete only own tickets
+    return ticket.createdBy && ticket.createdBy.toString() === userId;
   }
-  return ticket.department === req.user.department;
+  
+  if (role === 'manager' || role === 'admin') {
+    // Can delete tickets in same department
+    return ticket.department === department;
+  }
+  
+  return false;
 }
 
-// Mark complete
-// - manager/admin only; within department
+// Mark complete permissions
 async function canMarkComplete(req, ticket) {
-  if (!ticket) return false;
-  if (req.user.role === 'manager' || req.user.role === 'admin') {
-    return ticket.department === req.user.department;
+  const { role, department } = req.user;
+  
+  if (role === 'employee') {
+    return false; // Employees cannot mark tickets complete
   }
+  
+  if (role === 'manager' || role === 'admin') {
+    return ticket.department === department;
+  }
+  
   return false;
 }
 
 // Assign permissions
-// - only manager/admin
-// - ticket must be in manager/admin's department
-// - assignee (if provided) must exist and be in the same department as the ticket
 async function canAssign(req, ticket, assigneeUser) {
-    if (!ticket) return false;
-    const isPrivileged = req.user.role === 'manager' || req.user.role === 'admin';
-    if (!isPrivileged) return false;
-    if (ticket.department !== req.user.department) return false;
-    if (assigneeUser && assigneeUser.department !== ticket.department) return false;
-    return true;
-  }
-  
-  
+  if (!ticket) return false;
+  const isPrivileged = req.user.role === 'manager' || req.user.role === 'admin';
+  if (!isPrivileged) return false;
+  if (ticket.department !== req.user.department) return false;
+  if (assigneeUser && assigneeUser.department !== ticket.department) return false;
+  return true;
+}
 
 module.exports = {
   requireRole,
   listScope,
   canAccessTeamScope,
-  canCreateFor,
+  canCreateTicket,
   canUpdate,
   canDelete,
   canMarkComplete,
-  canAssign 
+  canAssign,
 };
