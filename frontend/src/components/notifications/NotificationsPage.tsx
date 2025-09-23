@@ -102,22 +102,55 @@ export default function NotificationsPage() {
       
   };
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async() => {
+
+    try {
+
+    const res = await fetch("http://localhost:5000/api/notifications/all/read", {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
+        "Content-Type": "application/json"
+      },
+    });
+
+  
+
+    const data = await res.json();
+
     setNotifications(prev =>
-      prev.map(notification => ({ ...notification, isRead: true }))
+      prev.map(notification => ({ ...notification, read: true }))
     );
+
     toast({
       title: "All notifications marked as read",
       description: "All notifications have been marked as read.",
     });
+  } catch (err) {
+    console.error("Error marking all notifications as read:", err);
+  }
   };
 
-  const deleteNotification = (id: string) => {
+  const deleteNotification = async(id: string) => {
+   try{const res = await fetch(`http://localhost:5000/api/notifications/${id}`, {
+      method: "DELETE",
+      headers: {
+        "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
+      },
+    });
+
+    const data = await res.json();
+  
     setNotifications(prev => prev.filter(n => n._id !== id));
     toast({
       title: "Notification deleted",
       description: "The notification has been removed.",
     });
+  }catch(err){
+  console.error("Error deleting the notification:", err);
+  }
+    
+    
   };
 
   const formatDate = (dateString: string) => {
