@@ -2,9 +2,18 @@ const mongoose = require('mongoose');
 
 const NotificationSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  message: String,
+  title:{type:String},
+  message:{type:String},
+  type: {
+    type: String,
+    enum: ["success", "warning", "error", "info"], 
+    default: "info",
+  },
   read: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  actionUrl: {type:String},
+  ticketID:{type:String}
+
 });
 
 module.exports = mongoose.model('Notification', NotificationSchema);
