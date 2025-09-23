@@ -1,6 +1,5 @@
 // chatbot.js
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-
+const langchain = require('@langchain/google-genai')
 // Simple in-memory store: { userId: [ {role, content, ts}, ... ] }
 const conversations = {};
 const getHistory = (userId) => conversations[userId] || [];
@@ -14,9 +13,9 @@ const appendHistory = (userId, role, content) => {
   }
 };
 
-export function setupChatbotRoutes(app) {
+function setupChatbotRoutes(app) {
   // Init Gemini LLM
-  const llm = new ChatGoogleGenerativeAI({
+  const llm = new langchain.ChatGoogleGenerativeAI({
     model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
     temperature: 0.3,
     apiKey: process.env.GOOGLE_API_KEY,
@@ -66,3 +65,5 @@ Assistant:
     }
   });
 }
+
+module.exports = {setupChatbotRoutes}
