@@ -1,4 +1,5 @@
 const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { HumanMessage, SystemMessage, AIMessage } = require('@langchain/core/messages');
 const { z } = require('zod');
 const { tool } = require('@langchain/core/tools');
@@ -50,6 +51,104 @@ function buildMessages(userId, userText) {
   return messages;
 }
 
+const VALID_DEPARTMENTS = [
+  'support team A',
+  'software team',
+  'network team',
+  'infrastructure team',
+  'hardware team',
+  'database team',
+];
+const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'];
+
+// Robust fetch across Node versions
+let fetchFn = globalThis.fetch;
+if (!fetchFn) {
+  try { fetchFn = require('node-fetch'); }
+  catch { console.error('Please install node-fetch'); process.exit(1); }
+}
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const structuredModel = genAI.getGenerativeModel({
+  model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  systemInstruction:
+    'You are a helpdesk assistant. If a new ticket is needed, call create_ticket with the correct fields.',
+});
+
+const createTicketFunctionDeclarations = [
+  {
+    name: 'create_ticket',
+    description: 'Create a helpdesk ticket from user text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        description: { type: 'string' },
+        priority: { type: 'string', enum: VALID_PRIORITIES },
+        department: {
+          type: 'string',
+          enum: VALID_DEPARTMENTS,
+          description: 'Which team should handle this issue',
+        },
+      },
+      required: ['title', 'description', 'priority', 'department'],
+    },
+  },
+];
+
+// Structured parse helper (returns { title, description, priority, department })
+async function parseCreateTicketArgs(req, userText) {
+  const userId = req.user?.id || 'anon';
+  // Minimal ephemeral history; this parser is stateless for robustness
+  const chat = structuredModel.startChat({
+    tools: [{ functionDeclarations: createTicketFunctionDeclarations }],
+    history: [{ role: 'user', parts: [{ text: String(userText || '') }] }],
+  });
+
+  const result = await chat.sendMessage(userText);
+  const response = await result.response;
+  const functionCalls = response.functionCalls?.() || [];
+
+  if (!functionCalls.length || functionCalls[0].name !== 'create_ticket') {
+    throw new Error('Parser did not produce create_ticket arguments');
+  }
+  const args = functionCalls[0].args || {};
+
+  // Basic normalization
+  if (!args.title || !args.description || !args.priority || !args.department) {
+    throw new Error('Incomplete ticket fields after parsing');
+  }
+  if (!VALID_PRIORITIES.includes(args.priority)) {
+    throw new Error(`Invalid priority: ${args.priority}`);
+  }
+  if (!VALID_DEPARTMENTS.includes(args.department)) {
+    throw new Error(`Invalid department: ${args.department}`);
+  }
+  return args;
+}
+
+// Helper to POST to your API
+async function postTicketToAPI(req, payload) {
+  const resp = await fetchFn('http://localhost:5000/api/tickets', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: req.headers.authorization || '',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Ticket API error: ${resp.status} ${resp.statusText} ${text}`.trim());
+  }
+  return resp.json().catch(() => ({}));
+}
+
+function summarizeTicket(args, apiResult) {
+  const id = apiResult?.ticket_id || '(pending id)';
+  return `Ticket created successfully.\nID: ${id}\nTitle: ${args.title}\nPriority: ${args.priority}\nDepartment: ${args.department}`;
+}
+
 
 // === TOOL DEFINITIONS ===
 
@@ -61,8 +160,13 @@ const fetchMyTicketsTool = tool(
     try {
       console.log('🔧 Fetching user tickets...');
       const headers = { 'Authorization': req.headers.authorization };
+      const query = new URLSearchParams({ scope: 'me' });
+
+      if (input.status) query.append('status', input.status);
+      if (input.priority) query.append('priority', input.priority);
+      if (input.keywords?.length > 0) query.append('keywords', input.keywords.join('+'));
       
-      const response = await fetch('http://localhost:5000/api/tickets?scope=me', {
+      const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
         headers
       });
@@ -75,12 +179,17 @@ const fetchMyTicketsTool = tool(
       const tickets = data.tickets || [];
       
       if (tickets.length === 0) {
-        return "You have no tickets assigned to you.";
+        return "No tickets found for you";
       }
       
-      const summary = `You have ${tickets.length} ticket(s):\n` +
-        tickets.map((t, i) => `${i+1}. ${t.title} (${t.priority} priority, ${t.status})`).join('\n');
+      const byStatus = tickets.reduce((acc, t) => {
+        acc[t.status] = (acc[t.status] || 0) + 1;
+        return acc;
+      }, {});
       
+      const summary = `You have ${tickets.length} ticket(s):\n` +
+        Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
+
       console.log('User tickets fetched successfully');
       return summary;
     } catch (error) {
@@ -91,7 +200,11 @@ const fetchMyTicketsTool = tool(
   {
     name: "fetchMyTickets",
     description: "Fetches tickets assigned to or created by the current user",
-    schema: z.object({}),
+    schema: z.object({
+      status: z.string().optional().describe("Filter by status: 'open', 'in_progress', 'resolved'"),
+      priority: z.string().optional().describe("Filter by priority: 'low', 'medium', 'high', 'urgent'"),
+      keywords: z.array(z.string()).optional().describe("Filter by tickets having certain keywords(max 3)")
+    }),
   }
 );
 
@@ -154,6 +267,47 @@ const fetchTeamTicketsTool = tool(
   }
 );
 
+// New LangChain tool (keeps existing tools unchanged)
+const createTicketTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    const rawUserMessage = config?.configurable?.rawUserMessage || '';
+    if (!req) throw new Error('Request context not available');
+
+    // If args are incomplete, parse them from the user message via Structured API
+    let args = { ...input };
+    const needParse =
+      !args.title || !args.description || !args.priority || !args.department;
+
+    if (needParse) {
+      if (!rawUserMessage) throw new Error('Missing user message for parsing');
+      args = await parseCreateTicketArgs(req, rawUserMessage);
+    }
+
+    // POST to API (server enforces RBAC/department policy)
+    const result = await postTicketToAPI(req, args);
+    return summarizeTicket(args, result);
+  },
+  {
+    name: 'createTicket',
+    description:
+      'Create a helpdesk ticket. If any arguments are missing, the tool will infer them from the latest user message.',
+    schema: z.object({
+      title: z.string().optional(),
+      description: z.string().optional(),
+      priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+      department: z.enum([
+        'support team A',
+        'software team',
+        'network team',
+        'infrastructure team',
+        'hardware team',
+        'database team',
+      ]).optional(),
+    }),
+  }
+);
+
 // === MAIN CHATBOT SETUP ===
 
 function setupChatbotRoutes(app) {
@@ -162,7 +316,8 @@ function setupChatbotRoutes(app) {
   // Create tools map for easy access
   const toolsMap = {
     fetchMyTickets: fetchMyTicketsTool,
-    fetchTeamTickets: fetchTeamTicketsTool
+    fetchTeamTickets: fetchTeamTicketsTool,
+    createTicket: createTicketTool,
   };
 
   // Initialize LLM with tools
@@ -171,7 +326,7 @@ function setupChatbotRoutes(app) {
     temperature: 0.1,
     apiKey: process.env.GOOGLE_API_KEY,
   }).withConfig({
-    tools: [fetchMyTicketsTool, fetchTeamTicketsTool]
+    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, createTicketTool]
   });
 
   app.post("/api/ai-chat", async (req, res) => {
@@ -204,26 +359,28 @@ function setupChatbotRoutes(app) {
       const toolCalls = response.tool_calls || [];
       if (toolCalls.length > 0) {
         const toolCall = toolCalls[0];
-        const tool = toolsMap[toolCall.name];
-        if (!tool) {
-          const reply = "I tried to use a tool that's not available.";
-          appendHistory(userId, "assistant", reply);
-          return res.json({ reply, timestamp: new Date().toISOString() });
+        const toolName = toolCall.name;
+        const toolArgs = toolCall.args || {};
+      
+        if (toolsMap[toolName]) {
+          try {
+            const toolResult = await toolsMap[toolName].invoke(toolArgs, {
+              configurable: { req, rawUserMessage: message },
+            });
+      
+            const reply = typeof toolResult === 'string'
+              ? toolResult
+              : (toolResult?.summary || JSON.stringify(toolResult));
+      
+            appendHistory(userId, 'assistant', reply);
+            return res.json({ reply, toolUsed: toolName, timestamp: new Date().toISOString() });
+          } catch (toolError) {
+            const errorReply = `I encountered an error: ${toolError.message}`;
+            appendHistory(userId, 'assistant', errorReply);
+            return res.json({ reply: errorReply, error: toolError.message, timestamp: new Date().toISOString() });
+          }
         }
-        try {
-          const toolResult = await tool.invoke(toolCall.args || {}, { configurable: { req } });
-          const reply = typeof toolResult === 'string'
-            ? toolResult
-            : (toolResult?.summary || JSON.stringify(toolResult));
-          appendHistory(userId, "assistant", reply);
-          return res.json({ reply, toolUsed: toolCall.name, timestamp: new Date().toISOString() });
-        } catch (e) {
-          const reply = `I encountered an error: ${e.message}`;
-          appendHistory(userId, "assistant", reply);
-          return res.json({ reply, error: e.message, timestamp: new Date().toISOString() });
-        }
-      }
-  
+      }  
       const reply = typeof response.content === 'string'
         ? response.content
         : Array.isArray(response.content)

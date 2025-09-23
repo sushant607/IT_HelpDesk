@@ -8,19 +8,20 @@ const {
   canDelete,
   canMarkComplete,
   canAssign,
+  canCreateTicket
 } = require('../middleware/authorizeAction');
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
 
-// GET /api/tickets?scope=me|team&status=&priority=
+// GET /api/tickets?scope=me|team&status=&priority=&keywords=
 router.get('/', authenticate, async (req, res) => {
   try {
-    //console.log(req);
-    const { scope = 'me', status, priority } = req.query || {};
+
+    const { scope = 'me', status, priority, keywords } = req.query || {};
     const filter = {};
 
     if (scope === 'me') {
-      filter.createdBy = new mongoose.Types.ObjectId(req.user.id);
+      filter.assignedTo = new mongoose.Types.ObjectId(req.user.id);
     } else if (scope === 'team') {
       if (req.user.role === 'employee') {
         return res.status(403).json({ msg: 'Forbidden: Employees cannot access team tickets' });
@@ -36,11 +37,22 @@ router.get('/', authenticate, async (req, res) => {
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
 
-    const tickets = await Ticket.find(filter)
+    let tickets = await Ticket.find(filter)
       .populate('createdBy', 'name email role department')
       .populate('assignedTo', 'name email role department')
       .sort({ createdAt: -1 });
-    console.log(tickets);
+
+    if(keywords){
+      const keywordArray = keywords.split('+');
+      tickets = tickets.filter((ticket) => {
+        for(const keyword of keywordArray) {
+          if(ticket.description?.includes(keyword) || ticket.title.includes(keyword)){
+            return true;
+          }
+        }
+        return false;
+      })
+    }
     return res.json({ tickets });
   } catch (e) {
     console.error('GET /tickets error:', e);
@@ -50,59 +62,60 @@ router.get('/', authenticate, async (req, res) => {
 
 // POST /api/tickets
 router.post('/', authenticate, async (req, res) => {
-  try {
-    const { title, description = '', department, priority, assignedTo = null, createdForUserId } = req.body || {};
-    if (!title || !priority) {
-      return res.status(400).json({ msg: 'title and priority required' });
-    }
-
-    // Determine who the ticket is created for
-    const targetUserId = createdForUserId || req.user.id;
-
-    // Permission check (employees can only create for self; managers/admin may create for others per policy)
-    if (!canCreateFor(req, targetUserId)) {
-      return res.status(403).json({ msg: 'not allowed to create for others' });
-    }
-
-    // Resolve target user's department
-    const targetUser = await User.findById(targetUserId).select('department role');
-    if (!targetUser) return res.status(400).json({ msg: 'target user not found' });
-
-    // Compute ticket department based on role policy
-    const ticketDept = req.user.role === 'employee' ? targetUser.department : req.user.department;
-    if (!ticketDept) return res.status(400).json({ msg: 'missing department context' });
-
-    // Managers/Admin cannot create across departments
-    if ((req.user.role === 'manager' || req.user.role === 'admin') && ticketDept !== req.user.department) {
-      return res.status(403).json({ msg: 'cross-department create not allowed' });
-    }
-
-    // If assigning, validate assignee exists and is same department
-    if (assignedTo) {
-      const assignee = await User.findById(assignedTo).select('department');
-      if (!assignee) return res.status(400).json({ msg: 'assignee not found' });
-      if (assignee.department !== ticketDept) {
-        return res.status(403).json({ msg: 'assignee must be in same department' });
+    try {
+      const { title, description = '', priority, createdForUserId, assignedTo } = req.body || {};
+      
+      if (!title || !priority) {
+        return res.status(400).json({ msg: 'title and priority required' });
       }
+  
+      // Determine who the ticket is created for (default: self)
+      const targetUserId = createdForUserId || req.user.id;
+      
+      // MANDATORY: assignedTo is required
+      if (!assignedTo) {
+        return res.status(400).json({ msg: 'assignedTo is required - tickets must be assigned' });
+      }
+  
+      // Check creation permissions with new policy
+      const { allowed, reason } = await canCreateTicket(req, targetUserId, assignedTo);
+      if (!allowed) {
+        return res.status(403).json({ msg: reason });
+      }
+  
+      // Get target user for department context
+      const targetUser = await User.findById(targetUserId).select('department');
+      if (!targetUser) {
+        return res.status(400).json({ msg: 'target user not found' });
+      }
+  
+      // Set ticket department (always the target user's department)
+      const ticketDept = targetUser.department;
+      if (!ticketDept) {
+        return res.status(400).json({ msg: 'target user missing department' });
+      }
+  
+      // Create ticket
+      const doc = await Ticket.create({
+        title,
+        description,
+        priority,
+        createdBy: targetUserId,
+        assignedTo,
+        department: ticketDept,
+        status: 'open', //obv
+      });
+      console.log(doc);
+      return res.status(201).json({ 
+        ticket_id: doc._id,
+        message: 'Ticket created and assigned successfully'
+      });
+      
+    } catch (e) {
+      console.error('POST /tickets error:', e);
+      return res.status(500).json({ msg: 'create_error' });
     }
-
-    const doc = await Ticket.create({
-      title,
-      description,
-      priority,
-      createdBy: targetUserId,
-      assignedTo,
-      department: ticketDept,
-      status: 'open',
-    });
-
-    return res.status(201).json({ ticket_id: doc._id });
-  } catch (e) {
-    console.error('POST /tickets error:', e);
-    return res.status(500).json({ msg: 'create_error' });
-  }
-});
-
+  });
 // PATCH /api/tickets/:id
 router.patch('/:id', authenticate, async (req, res) => {
   try {

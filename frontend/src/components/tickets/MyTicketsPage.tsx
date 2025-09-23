@@ -34,7 +34,7 @@ export default function MyTicketsPage() {
         //console.log(token);
         const res = await fetch("http://localhost:5000/api/tickets?scope=me", {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: Bearer ${token},
           },
         });
         console.log(res);
@@ -181,7 +181,7 @@ export default function MyTicketsPage() {
           </Card>
         ) : (
           filteredTickets.map((ticket) => (
-            <Card key={ticket.id} className={`bg-gradient-card border-0 shadow-md border-l-4 ${getPriorityColor(ticket.priority)} hover:shadow-lg transition-all duration-200`}>
+            <Card key={ticket.id} className={bg-gradient-card border-0 shadow-md border-l-4 ${getPriorityColor(ticket.priority)} hover:shadow-lg transition-all duration-200}>
               <CardContent className="p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -190,7 +190,7 @@ export default function MyTicketsPage() {
                       <Badge variant="outline" className="text-xs">
                         {ticket.id}
                       </Badge>
-                      <Badge className={`${getStatusColor(ticket.status)} text-xs`}>
+                      <Badge className={${getStatusColor(ticket.status)} text-xs}>
                         {ticket.status.replace("-", " ").toUpperCase()}
                       </Badge>
                     </div>
@@ -205,7 +205,7 @@ export default function MyTicketsPage() {
                       </span>
                       <span className="flex items-center gap-1">
                         <strong>Priority:</strong>
-                        <Badge variant="outline" className={`text-xs ml-1 ${getPriorityColor(ticket.priority)}`}>
+                        <Badge variant="outline" className={text-xs ml-1 ${getPriorityColor(ticket.priority)}}>
                           {ticket.priority}
                         </Badge>
                       </span>
@@ -222,7 +222,7 @@ export default function MyTicketsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/dashboard/tickets/${ticket.id}`)}
+                      onClick={() => navigate(/dashboard/tickets/${ticket.id})}
                     >
                       <Eye className="w-4 h-4 mr-1" />
                       View
@@ -231,7 +231,7 @@ export default function MyTicketsPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => navigate(`/dashboard/tickets/${ticket.id}?edit=true`)}
+                        onClick={() => navigate(/dashboard/tickets/${ticket.id}?edit=true)}
                       >
                         <Edit className="w-4 h-4 mr-1" />
                         Edit
