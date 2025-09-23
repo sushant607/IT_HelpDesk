@@ -1,33 +1,42 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
 const connectDB = require('./config/db');
-const path = require('path');
+const authenticate = require('./middleware/auth');
 const ai = require('./ai');
 
 const app = express();
+
+// --- Core Middleware ---
+app.use(helmet()); // Basic security headers
 app.use(cors({
-  origin: ['http://localhost:8080'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173', // Your frontend URL
+  credentials: true, // Important for sending cookies with requests
 }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-// Connect DB
+app.use(express.json()); // For parsing application/json
+app.use(cookieParser()); // For parsing cookies, used by auth middleware
+
+// Connect to MongoDB
 connectDB();
 
-// Routes
-app.use('/api/auth', require('./routes/auth'));
-// app.use('/api/users', require('./routes/users'));
-app.use('/api/tickets', require('./routes/tickets'));
-app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/chatbot', require('./routes/chatbot'));
+// --- API Routes ---
 
+// Public routes (authentication)
+app.use('/api/auth', require('./routes/auth'));
+
+// Protected routes
+app.use('/api/tickets', authenticate, require('./routes/authTickets')); // Use the secure ticket routes
+app.use('/api/notifications', authenticate, require('./routes/notifications'));
+
+// --- AI Chatbot Route ---
+app.use('/api/ai-chat', authenticate);
 ai.setupChatbotRoutes(app);
 
-// Health check
-app.get('/api/health', (req, res) => res.json({status: 'ok'}));
+// Health check endpoint
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+// --- Server Startup ---
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
