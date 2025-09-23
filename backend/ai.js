@@ -61,8 +61,12 @@ const fetchMyTicketsTool = tool(
     try {
       console.log('🔧 Fetching user tickets...');
       const headers = { 'Authorization': req.headers.authorization };
+      const query = new URLSearchParams({ scope: 'me' });
+
+      if (input.status) query.append('status', input.status);
+      if (input.priority) query.append('priority', input.priority);
       
-      const response = await fetch('http://localhost:5000/api/tickets?scope=me', {
+      const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
         headers
       });
@@ -75,12 +79,17 @@ const fetchMyTicketsTool = tool(
       const tickets = data.tickets || [];
       
       if (tickets.length === 0) {
-        return "You have no tickets assigned to you.";
+        return "No tickets found for you";
       }
       
-      const summary = `You have ${tickets.length} ticket(s):\n` +
-        tickets.map((t, i) => `${i+1}. ${t.title} (${t.priority} priority, ${t.status})`).join('\n');
+      const byStatus = tickets.reduce((acc, t) => {
+        acc[t.status] = (acc[t.status] || 0) + 1;
+        return acc;
+      }, {});
       
+      const summary = `You have ${tickets.length} ticket(s):\n` +
+        Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
+
       console.log('User tickets fetched successfully');
       return summary;
     } catch (error) {
@@ -91,7 +100,10 @@ const fetchMyTicketsTool = tool(
   {
     name: "fetchMyTickets",
     description: "Fetches tickets assigned to or created by the current user",
-    schema: z.object({}),
+    schema: z.object({
+      status: z.string().optional().describe("Filter by status: 'open', 'in_progress', 'resolved'"),
+      priority: z.string().optional().describe("Filter by priority: 'low', 'medium', 'high', 'urgent'")
+    }),
   }
 );
 
@@ -171,7 +183,7 @@ function setupChatbotRoutes(app) {
     temperature: 0.1,
     apiKey: process.env.GOOGLE_API_KEY,
   }).withConfig({
-    tools: [fetchMyTicketsTool, fetchTeamTicketsTool]
+    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, fetchMyOpenTicketsTool]
   });
 
   app.post("/api/ai-chat", async (req, res) => {
