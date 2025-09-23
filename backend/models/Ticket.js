@@ -39,7 +39,8 @@ const TicketSchema = new mongoose.Schema({
   comments: [CommentSchema],
   attachments: [String],
   createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now }
+  updatedAt: { type: Date, default: Date.now },
+  storyPoints: {type: Number, default: 1}
 });
 
 module.exports = mongoose.model('Ticket', TicketSchema);
