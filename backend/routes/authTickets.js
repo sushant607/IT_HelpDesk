@@ -13,10 +13,10 @@ const {
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
 
-// GET /api/tickets?scope=me|team&status=&priority=
+// GET /api/tickets?scope=me|team&status=&priority=&keywords=
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { scope = 'me', status, priority } = req.query || {};
+    const { scope = 'me', status, priority, keywords } = req.query || {};
     const filter = {};
 
     if (scope === 'me') {
@@ -36,10 +36,22 @@ router.get('/', authenticate, async (req, res) => {
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
 
-    const tickets = await Ticket.find(filter)
+    let tickets = await Ticket.find(filter)
       .populate('createdBy', 'name email role department')
       .populate('assignedTo', 'name email role department')
       .sort({ createdAt: -1 });
+
+    if(keywords){
+      const keywordArray = keywords.split('+');
+      tickets = tickets.filter((ticket) => {
+        for(const keyword of keywordArray) {
+          if(ticket.description?.includes(keyword) || ticket.title.includes(keyword)){
+            return true;
+          }
+        }
+        return false;
+      })
+    }
 
     return res.json({ tickets });
   } catch (e) {

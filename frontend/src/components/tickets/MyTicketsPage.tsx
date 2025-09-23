@@ -16,6 +16,9 @@ interface TicketData {
   priority: "low" | "medium" | "high" | "urgent";
   createdAt: string;
   updatedAt: string;
+  // New display fields derived from populated refs
+  createdByName?: string;
+  assignedToName?: string;
 }
 
 export default function MyTicketsPage() {
@@ -26,82 +29,88 @@ export default function MyTicketsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const navigate = useNavigate();
 
+  // Fetch assigned-to-me tickets from backend
   useEffect(() => {
-    // Mock data for employee's tickets
-    const mockTickets: TicketData[] = [
-      {
-        id: "T001",
-        title: "Password Reset Request",
-        description: "Unable to access company email account after password expiration",
-        category: "Account Access",
-        status: "resolved",
-        priority: "medium",
-        createdAt: "2024-01-15",
-        updatedAt: "2024-01-16"
-      },
-      {
-        id: "T002",
-        title: "Software Installation Issue",
-        description: "Need Adobe Creative Suite installed on my workstation for design projects",
-        category: "Software",
-        status: "in-progress",
-        priority: "high",
-        createdAt: "2024-01-18",
-        updatedAt: "2024-01-20"
-      },
-      {
-        id: "T003",
-        title: "VPN Connection Problems",
-        description: "Cannot connect to company VPN from home office. Getting timeout errors.",
-        category: "Network",
-        status: "open",
-        priority: "medium",
-        createdAt: "2024-01-20",
-        updatedAt: "2024-01-20"
-      },
-      {
-        id: "T004",
-        title: "Laptop Performance Issues",
-        description: "Work laptop running very slow, frequent freezing during video calls",
-        category: "Hardware",
-        status: "open",
-        priority: "high",
-        createdAt: "2024-01-21",
-        updatedAt: "2024-01-21"
-      },
-      {
-        id: "T005",
-        title: "Email Signature Setup",
-        description: "Need help setting up corporate email signature with logo",
-        category: "Email",
-        status: "closed",
-        priority: "low",
-        createdAt: "2024-01-10",
-        updatedAt: "2024-01-12"
+    const fetchAssigned = async () => {
+      try {
+        const token = localStorage.getItem("auth_token"); // adjust if token stored elsewhere [file:1f91ef64-8f79-47ba-b4ab-4c5e24f3a0ab]
+        const res = await fetch("http://localhost:5000/api/tickets", { // assigned route filters by req.user.id [file:3f883422-be55-48fe-98ba-349bb97ba5ef]
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        });
+
+        const txt = await res.text();
+        let data: unknown;
+        try { data = JSON.parse(txt); } catch { data = txt; }
+
+        if (!res.ok) {
+          const msg = typeof data === "string" ? data : (data as any)?.msg || `Request failed with ${res.status}`;
+          throw new Error(msg); // keep clean error surfacing [file:58d33a1c-b473-4b97-8828-c7ee17c0ca57]
+        }
+
+        // Accept either a bare array or { tickets: [...] } as per your Postman response [file:58d33a1c-b473-4b97-8828-c7ee17c0ca57]
+        let list: any[] | null = null;
+        if (Array.isArray(data)) {
+          list = data;
+        } else if (data && typeof data === "object" && Array.isArray((data as any).tickets)) {
+          list = (data as any).tickets;
+        }
+
+        if (!list) {
+          console.error("Unexpected payload for /assigned:", data);
+          setTickets([]);
+          setFilteredTickets([]);
+          return; // graceful empty state without throwing [file:58d33a1c-b473-4b97-8828-c7ee17c0ca57]
+        }
+
+        // Map API -> UI shape including names from populated createdBy/assignedTo [file:3f883422-be55-48fe-98ba-349bb97ba5ef]
+        const mapped: TicketData[] = list.map((t: any) => ({
+          id: t._id,
+          title: t.title,
+          description: t.description ?? "",
+          category: t.department ?? "General",
+          status: t.status === "in_progress" ? "in-progress" : t.status,
+          priority: t.priority,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          createdByName: t?.createdBy?.name,           // populated by backend .populate('createdBy','name email') [file:3f883422-be55-48fe-98ba-349bb97ba5ef]
+          assignedToName: t?.assignedTo?.name,         // populated by backend .populate('assignedTo','name email') [file:3f883422-be55-48fe-98ba-349bb97ba5ef]
+        }));
+
+        setTickets(mapped);
+        setFilteredTickets(mapped);
+      } catch (e) {
+        console.error("Failed to load assigned tickets:", e);
+        setTickets([]);
+        setFilteredTickets([]);
       }
-    ];
-    setTickets(mockTickets);
-    setFilteredTickets(mockTickets);
+    };
+    fetchAssigned();
   }, []);
 
   useEffect(() => {
     let filtered = tickets;
 
-    // Search filter
+    // Search filter across title/description/category and also names [file:58d33a1c-b473-4b97-8828-c7ee17c0ca57]
     if (searchQuery) {
+      const q = searchQuery.toLowerCase();
       filtered = filtered.filter(ticket =>
-        ticket.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ticket.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ticket.category.toLowerCase().includes(searchQuery.toLowerCase())
+        ticket.title.toLowerCase().includes(q) ||
+        ticket.description.toLowerCase().includes(q) ||
+        ticket.category.toLowerCase().includes(q) ||
+        (ticket.createdByName?.toLowerCase().includes(q) ?? false) ||
+        (ticket.assignedToName?.toLowerCase().includes(q) ?? false)
       );
     }
 
-    // Status filter
+    // Status filter [file:58d33a1c-b473-4b97-8828-c7ee17c0ca57]
     if (statusFilter !== "all") {
       filtered = filtered.filter(ticket => ticket.status === statusFilter);
     }
 
-    // Category filter
+    // Category filter [file:58d33a1c-b473-4b97-8828-c7ee17c0ca57]
     if (categoryFilter !== "all") {
       filtered = filtered.filter(ticket => ticket.category === categoryFilter);
     }
@@ -129,7 +138,7 @@ export default function MyTicketsPage() {
     }
   };
 
-  const categories = ["Account Access", "Software", "Network", "Hardware", "Email"];
+  const categories = ["Account Access", "Software", "Network", "Hardware", "Email"]; // static UI categories [file:58d33a1c-b473-4b97-8828-c7ee17c0ca57]
 
   return (
     <div className="space-y-6">
@@ -221,8 +230,13 @@ export default function MyTicketsPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="font-semibold text-lg">{ticket.title}</h3>
+                      {/* Show names if available; fallback to short id */}
                       <Badge variant="outline" className="text-xs">
-                        {ticket.id}
+                        {ticket.assignedToName
+                          ? `Assigned: ${ticket.assignedToName}`
+                          : ticket.createdByName
+                            ? `Created: ${ticket.createdByName}`
+                            : ticket.id.substring(0, 8)}
                       </Badge>
                       <Badge className={`${getStatusColor(ticket.status)} text-xs`}>
                         {ticket.status.replace("-", " ").toUpperCase()}
@@ -249,6 +263,17 @@ export default function MyTicketsPage() {
                       <span>
                         <strong>Updated:</strong> {new Date(ticket.updatedAt).toLocaleDateString()}
                       </span>
+                      {/* Optional: show both names inline for clarity */}
+                      {ticket.createdByName && (
+                        <span className="flex items-center gap-1">
+                          <strong>Creator:</strong> {ticket.createdByName}
+                        </span>
+                      )}
+                      {ticket.assignedToName && (
+                        <span className="flex items-center gap-1">
+                          <strong>Assignee:</strong> {ticket.assignedToName}
+                        </span>
+                      )}
                     </div>
                   </div>
                   
@@ -280,7 +305,7 @@ export default function MyTicketsPage() {
       </div>
 
       {/* Results Summary */}
-      {filteredTickets.length > 0 && (
+      {filteredTickets.length === 0 ? null : (
         <div className="text-center text-sm text-muted-foreground">
           Showing {filteredTickets.length} of {tickets.length} tickets
         </div>
