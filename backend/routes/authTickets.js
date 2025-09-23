@@ -16,6 +16,7 @@ const User = require('../models/User');
 // GET /api/tickets?scope=me|team&status=&priority=&keywords=
 router.get('/', authenticate, async (req, res) => {
   try {
+
     const { scope = 'me', status, priority, keywords } = req.query || {};
     const filter = {};
 
@@ -52,7 +53,6 @@ router.get('/', authenticate, async (req, res) => {
         return false;
       })
     }
-
     return res.json({ tickets });
   } catch (e) {
     console.error('GET /tickets error:', e);
@@ -116,7 +116,6 @@ router.post('/', authenticate, async (req, res) => {
       return res.status(500).json({ msg: 'create_error' });
     }
   });
-  
 // PATCH /api/tickets/:id
 router.patch('/:id', authenticate, async (req, res) => {
   try {
