@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 interface TicketFormData {
   title: string;
   description: string;
-  category: string;
+  department: string;
   priority: "low" | "medium" | "high" | "urgent";
   assignee?: string;
 }
@@ -22,7 +22,7 @@ export default function NewTicketPage() {
   const [formData, setFormData] = useState<TicketFormData>({
     title: "",
     description: "",
-    category: "",
+    department:"",
     priority: "medium",
     assignee: "unassigned",
   });
@@ -32,7 +32,7 @@ export default function NewTicketPage() {
   const { toast } = useToast();
   const userRole = localStorage.getItem("user_role");
 
-  const categories = [
+  const departments = [
     "Account Access",
     "Software",
     "Hardware",
@@ -59,7 +59,7 @@ export default function NewTicketPage() {
     setFormData(prev => ({ ...prev, [field]: value }));
     setError("");
   };
-
+  console.log(formData);
   const validateForm = () => {
     if (!formData.title.trim()) {
       setError("Title is required");
@@ -69,59 +69,57 @@ export default function NewTicketPage() {
       setError("Description is required");
       return false;
     }
-    if (!formData.category) {
-      setError("Please select a category");
+    if (!formData.department) {
+      setError("Please select a department");
       return false;
     }
     return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm()) return;
-    
-    setIsLoading(true);
-    setError("");
+  e.preventDefault();
 
-    try {
-      // Mock ticket creation - In real app, use Supabase
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const ticketId = `T${Date.now().toString().slice(-6)}`;
-      
-      // Store ticket data (in real app, this would go to database)
-      const newTicket = {
-        id: ticketId,
-        ...formData,
-        status: "open",
-        createdAt: new Date().toISOString().split('T')[0],
-        updatedAt: new Date().toISOString().split('T')[0],
-        createdBy: localStorage.getItem("user_email") || "Unknown",
-      };
+  if (!validateForm()) return;
 
-      // Mock storage
-      const existingTickets = JSON.parse(localStorage.getItem("user_tickets") || "[]");
-      existingTickets.push(newTicket);
-      localStorage.setItem("user_tickets", JSON.stringify(existingTickets));
-      
-      toast({
-        title: "Ticket created successfully!",
-        description: `Ticket ${ticketId} has been created and assigned.`,
-      });
-      
-      // Navigate back to tickets list
-      if (userRole === "manager") {
-        navigate("/dashboard/all-tickets");
-      } else {
-        navigate("/dashboard/tickets");
-      }
-    } catch (err) {
-      setError("Failed to create ticket. Please try again.");
-    } finally {
-      setIsLoading(false);
+  setIsLoading(true);
+  setError("");
+
+  try {
+    const token = localStorage.getItem("auth_token");
+   //console.log(token);
+    const res = await fetch("http://localhost:5000/api/tickets", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(formData), // send form data
+    });
+
+    if (!res.ok) {
+      throw new Error("Failed to create ticket");
     }
-  };
+
+    const newTicket = await res.json();
+
+    toast({
+      title: "Ticket created successfully!",
+      description: `Ticket ${newTicket._id} has been created.`,
+    });
+
+    // Navigate back
+    if (userRole === "manager") {
+      navigate("/dashboard/all-tickets");
+    } else {
+      navigate("/dashboard/tickets");
+    }
+  } catch (err) {
+    setError("Failed to create ticket. Please try again.");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -191,19 +189,19 @@ export default function NewTicketPage() {
             {/* Category and Priority Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="category">Category *</Label>
+                <Label htmlFor="department">Department *</Label>
                 <Select
-                  value={formData.category}
-                  onValueChange={(value) => handleInputChange("category", value)}
+                  value={formData.department}
+                  onValueChange={(value) => handleInputChange("department", value)}
                   required
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select a category" />
+                    <SelectValue placeholder="Select a department" />
                   </SelectTrigger>
                   <SelectContent>
-                    {categories.map(category => (
-                      <SelectItem key={category} value={category}>
-                        {category}
+                    {departments.map(department => (
+                      <SelectItem key={department} value={department}>
+                        {department}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -26,62 +26,28 @@ export default function MyTicketsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const navigate = useNavigate();
 
+
   useEffect(() => {
-    // Mock data for employee's tickets
-    const mockTickets: TicketData[] = [
-      {
-        id: "T001",
-        title: "Password Reset Request",
-        description: "Unable to access company email account after password expiration",
-        category: "Account Access",
-        status: "resolved",
-        priority: "medium",
-        createdAt: "2024-01-15",
-        updatedAt: "2024-01-16"
-      },
-      {
-        id: "T002",
-        title: "Software Installation Issue",
-        description: "Need Adobe Creative Suite installed on my workstation for design projects",
-        category: "Software",
-        status: "in-progress",
-        priority: "high",
-        createdAt: "2024-01-18",
-        updatedAt: "2024-01-20"
-      },
-      {
-        id: "T003",
-        title: "VPN Connection Problems",
-        description: "Cannot connect to company VPN from home office. Getting timeout errors.",
-        category: "Network",
-        status: "open",
-        priority: "medium",
-        createdAt: "2024-01-20",
-        updatedAt: "2024-01-20"
-      },
-      {
-        id: "T004",
-        title: "Laptop Performance Issues",
-        description: "Work laptop running very slow, frequent freezing during video calls",
-        category: "Hardware",
-        status: "open",
-        priority: "high",
-        createdAt: "2024-01-21",
-        updatedAt: "2024-01-21"
-      },
-      {
-        id: "T005",
-        title: "Email Signature Setup",
-        description: "Need help setting up corporate email signature with logo",
-        category: "Email",
-        status: "closed",
-        priority: "low",
-        createdAt: "2024-01-10",
-        updatedAt: "2024-01-12"
+    const fetchTickets = async () => {
+      try {
+        const token = localStorage.getItem("auth_token");
+        //console.log(token);
+        const res = await fetch("http://localhost:5000/api/tickets?scope=me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        console.log(res);
+        const data: TicketData[] = await res.json();
+        setTickets(data.tickets || []);
+        setFilteredTickets(data.tickets || []);
+
+      } catch (error) {
+        console.error("Error fetching tickets", error);
       }
-    ];
-    setTickets(mockTickets);
-    setFilteredTickets(mockTickets);
+    };
+
+    fetchTickets();
   }, []);
 
   useEffect(() => {
@@ -141,7 +107,7 @@ export default function MyTicketsPage() {
             Track and manage your support requests
           </p>
         </div>
-        <Button 
+        <Button
           onClick={() => navigate("/tickets/new")}
           className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
         >
@@ -171,7 +137,7 @@ export default function MyTicketsPage() {
                 />
               </div>
             </div>
-            
+
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full sm:w-40">
                 <SelectValue placeholder="Status" />
@@ -184,7 +150,7 @@ export default function MyTicketsPage() {
                 <SelectItem value="closed">Closed</SelectItem>
               </SelectContent>
             </Select>
-            
+
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger className="w-full sm:w-40">
                 <SelectValue placeholder="Category" />
@@ -228,17 +194,17 @@ export default function MyTicketsPage() {
                         {ticket.status.replace("-", " ").toUpperCase()}
                       </Badge>
                     </div>
-                    
+
                     <p className="text-muted-foreground mb-4 line-clamp-2">
                       {ticket.description}
                     </p>
-                    
+
                     <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <strong>Category:</strong> {ticket.category}
                       </span>
                       <span className="flex items-center gap-1">
-                        <strong>Priority:</strong> 
+                        <strong>Priority:</strong>
                         <Badge variant="outline" className={`text-xs ml-1 ${getPriorityColor(ticket.priority)}`}>
                           {ticket.priority}
                         </Badge>
@@ -251,10 +217,10 @@ export default function MyTicketsPage() {
                       </span>
                     </div>
                   </div>
-                  
+
                   <div className="flex gap-2 ml-4">
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       onClick={() => navigate(`/dashboard/tickets/${ticket.id}`)}
                     >
@@ -262,8 +228,8 @@ export default function MyTicketsPage() {
                       View
                     </Button>
                     {ticket.status === "open" && (
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         size="sm"
                         onClick={() => navigate(`/dashboard/tickets/${ticket.id}?edit=true`)}
                       >

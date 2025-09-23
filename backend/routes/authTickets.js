@@ -15,6 +15,7 @@ const User = require('../models/User');
 // GET /api/tickets?scope=me|team&status=&priority=
 router.get('/', authenticate, async (req, res) => {
   try {
+    //console.log(req);
     const { scope = 'me', status, priority } = req.query || {};
     const filter = {};
 
@@ -39,7 +40,7 @@ router.get('/', authenticate, async (req, res) => {
       .populate('createdBy', 'name email role department')
       .populate('assignedTo', 'name email role department')
       .sort({ createdAt: -1 });
-
+    console.log(tickets);
     return res.json({ tickets });
   } catch (e) {
     console.error('GET /tickets error:', e);
@@ -50,7 +51,7 @@ router.get('/', authenticate, async (req, res) => {
 // POST /api/tickets
 router.post('/', authenticate, async (req, res) => {
   try {
-    const { title, description = '', priority, assignedTo = null, createdForUserId } = req.body || {};
+    const { title, description = '', department, priority, assignedTo = null, createdForUserId } = req.body || {};
     if (!title || !priority) {
       return res.status(400).json({ msg: 'title and priority required' });
     }
