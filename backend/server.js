@@ -1,22 +1,18 @@
-// server.js
-const express = require('express');
-const app = express();
-const PORT = 3000;
+import express from 'express';
 
-// Middleware to parse JSON
+const app = express();
+const PORT = process.env.PORT || 5000;
+
 app.use(express.json());
 
-// Dummy route
 app.get('/', (req, res) => {
-  res.send('Server is running! 🚀');
+  res.send('Server is running with ES modules and ESLint! 🚀');
 });
 
-// Another test route
 app.get('/hello', (req, res) => {
   res.json({ message: 'Hello, Sushant!' });
 });
 
-// Start the server
 app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+  console.log(`Server listening at http://localhost:${PORT}`);
 });
