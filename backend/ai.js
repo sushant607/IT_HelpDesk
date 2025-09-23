@@ -324,7 +324,7 @@ function setupChatbotRoutes(app) {
     temperature: 0.1,
     apiKey: process.env.GOOGLE_API_KEY,
   }).withConfig({
-    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, fetchMyOpenTicketsTool, createTicketTool]
+    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, createTicketTool]
   });
 
   app.post("/api/ai-chat", async (req, res) => {
