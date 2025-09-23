@@ -13,6 +13,46 @@ const {
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
 
+// Utility: Get number of tickets assigned to a user
+async function countTicketsAssignedToUser(userId) {
+  if (!mongoose.Types.ObjectId.isValid(userId)) return 0;
+  return await Ticket.countDocuments({ assignedTo: userId });
+}
+
+// GET /api/tickets/recommend-assignees?department=
+router.get('/recommend-assignees', authenticate, async (req, res) => {
+  try {
+    const { department } = req.query || {};
+
+    // Get all users in the same department
+    const users = await User.find({ department: department.replace('+', ' ') }).select('name email role department');
+
+    // For each user, count assigned tickets
+    const userLoads = await Promise.all(users.map(async (user) => {
+      const count = await countTicketsAssignedToUser(user._id);
+      return { user, assignedCount: count };
+    }));
+
+    // Sort by assignedCount ascending
+    userLoads.sort((a, b) => a.assignedCount - b.assignedCount);
+
+    // Return top 3 users
+    const recommendations = userLoads.slice(0, 3).map(({ user, assignedCount }) => ({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      department: user.department,
+      assignedTicketCount: assignedCount
+    }));
+
+    return res.json({ recommendations });
+  } catch (e) {
+    console.error('GET /tickets/recommend-assignees error:', e);
+    return res.status(500).json({ msg: 'recommend_error' });
+  }
+});
+
 // GET /api/tickets?scope=me|team&status=&priority=&keywords=
 router.get('/', authenticate, async (req, res) => {
   try {

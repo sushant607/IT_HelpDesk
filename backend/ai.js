@@ -225,6 +225,7 @@ const fetchTeamTicketsTool = tool(
       
       if (input.status) query.append('status', input.status);
       if (input.priority) query.append('priority', input.priority);
+      if (input.keywords?.length > 0) query.append('keywords', input.keywords.join('+'));
       
       const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
@@ -262,7 +263,8 @@ const fetchTeamTicketsTool = tool(
     description: "Fetches tickets for the user's team/department (managers and admins only)",
     schema: z.object({
       status: z.string().optional().describe("Filter by status: 'open', 'in_progress', 'resolved'"),
-      priority: z.string().optional().describe("Filter by priority: 'low', 'medium', 'high', 'urgent'")
+      priority: z.string().optional().describe("Filter by priority: 'low', 'medium', 'high', 'urgent'"),
+      keywords: z.array(z.string()).optional().describe("Filter by tickets having certain keywords(max 3)")
     }),
   }
 );
@@ -334,7 +336,6 @@ function setupChatbotRoutes(app) {
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: "Message is required as a non-empty string." });
     }
-  
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
   
