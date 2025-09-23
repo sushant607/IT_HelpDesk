@@ -4,104 +4,85 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-// ==================== REGISTER ====================
+const VALID_DEPARTMENTS = [
+  'support team A',
+  'software team',
+  'network team',
+  'infrastructure team',
+  'hardware team',
+  'database team',
+];
+const VALID_ROLES = ['employee', 'manager', 'admin'];
+
+function signUserToken(user) {
+  const payload = {
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      department: user.department,
+    },
+  };
+  return jwt.sign(payload, process.env.JWT_SECRET || 'jwt_secret_placeholder', { expiresIn: '7d' });
+}
+
+// REGISTER
 router.post('/register', async (req, res) => {
-  const { name, email, password, role, department } = req.body;
-
   try {
-    // Check if user exists
-    let user = await User.findOne({ email });
-    if (user) {
-      return res.status(400).json({ errors: [{ msg: 'User already exists' }] });
+    const { name, email, password, role = 'employee', department } = req.body || {};
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ errors: [{ msg: 'name, email, password required' }] });
     }
-
-    // Validate department
-    const validDepartments = [
-      'support team A',
-      'software team',
-      'network team',
-      'infrastructure team',
-      'hardware team',
-      'database team'
-    ];
-
-    if (!department || !validDepartments.includes(department)) {
+    if (!department || !VALID_DEPARTMENTS.includes(department)) {
       return res.status(400).json({ errors: [{ msg: 'Invalid or missing department' }] });
     }
+    if (!VALID_ROLES.includes(role)) {
+      return res.status(400).json({ errors: [{ msg: 'Invalid role' }] });
+    }
 
-    // Create user
+    let user = await User.findOne({ email });
+    if (user) return res.status(400).json({ errors: [{ msg: 'User already exists' }] });
+
     user = new User({ name, email, password, role, department });
-
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(password, salt);
-
     await user.save();
 
-    // JWT payload
-    const payload = { user: { id: user.id } };
-
-    const token = jwt.sign(
-      payload,
-      process.env.JWT_SECRET || 'jwt_secret_placeholder',
-      { expiresIn: '7d' }
-    );
-
-    res.json({
+    const token = signUserToken(user);
+    return res.status(201).json({
+      success: true,
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        department: user.department
-      }
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, department: user.department },
     });
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server error');
+    return res.status(500).json({ errors: [{ msg: 'Server error' }] });
   }
 });
 
-// ==================== LOGIN ====================
+// LOGIN
 router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-
   try {
-    // Find user
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ errors: [{ msg: 'email and password required' }] });
+    }
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ errors: [{ msg: 'Invalid credentials' }] });
-    }
+    if (!user) return res.status(400).json({ errors: [{ msg: 'Invalid credentials' }] });
 
-    // Check password
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ errors: [{ msg: 'Invalid credentials' }] });
-    }
+    if (!isMatch) return res.status(400).json({ errors: [{ msg: 'Invalid credentials' }] });
 
-    // JWT payload
-    const payload = { user: { id: user.id } };
-
-    const token = jwt.sign(
-      payload,
-      process.env.JWT_SECRET || 'jwt_secret_placeholder',
-      { expiresIn: '7d' }
-    );
-
-    res.json({
+    const token = signUserToken(user);
+    return res.status(200).json({
+      success: true,
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        department: user.department
-      }
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, department: user.department },
     });
   } catch (err) {
     console.error(err.message);
-    res.status(500).send('Server error');
+    return res.status(500).json({ errors: [{ msg: 'Server error' }] });
   }
 });
 
