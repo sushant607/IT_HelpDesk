@@ -7,7 +7,11 @@ dotenv.config();
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 const model = genAI.getGenerativeModel({
     model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    systemInstruction: "You are a helpdesk assistant designed to help people with technical issues. You should try to resolve trivial issues yourself before using the function provided to create a new ticket.",
 });
+
+// In-memory conversation store: { userId: [ { role, parts } ] }
+const conversations = {};
 
 // Define the create_ticket function schema
 const functions = [
@@ -21,29 +25,44 @@ const functions = [
                 title: { type: "string" },
                 description: { type: "string" },
                 priority: { type: "string", enum: ["low", "medium", "high"] },
-                tags: { type: "array", items: { type: "string" } },
-                assigned_to: { type: "string" },
-                due_date: {
+                department: {
                     type: "string",
-                    description: "ISO 8601 date (YYYY-MM-DD) or null",
-                },
-                metadata: { type: "object" },
+                    enum: [
+                        'support team A',
+                        'software team',
+                        'network team',
+                        'infrastructure team',
+                        'hardware team',
+                        'database team'
+                    ],
+                    description: "Which team the issue should be assigned to",
+                }
             },
-            required: ["title", "description", "priority", "tags"],
+            required: ["title", "description", "priority", "department"],
         },
     },
 ];
 
 module.exports.setupChatbotRoutes = (app) => {
     app.post("/api/chat", async (req, res) => {
-        const { message } = req.body;
-        if (!message) return res.status(400).json({ error: "Message is required" });
+        const { user_id, message } = req.body;
+        if (!user_id || !message) {
+            return res.status(400).json({ error: "user_id and message are required" });
+        }
+
+        // Initialize history for new users
+        if (!conversations[user_id]) {
+            conversations[user_id] = [];
+        }
 
         try {
-            // Send user message along with tool definition
+            // Add user message to history
+            conversations[user_id].push({ role: "user", parts: [{ text: message }] });
+
+            // Start chat with user-specific history
             const chat = model.startChat({
                 tools: [{ functionDeclarations: functions }],
-                history: [],
+                history: conversations[user_id],
             });
 
             const result = await chat.sendMessage(message);
@@ -51,24 +70,33 @@ module.exports.setupChatbotRoutes = (app) => {
 
             // Check if the model decided to call a function
             const functionCalls = response.functionCalls();
-
             if (functionCalls && functionCalls.length > 0) {
                 const fnCall = functionCalls[0];
                 if (fnCall.name === "create_ticket") {
-                    // Extract structured arguments
-                    const args = fnCall.args;
+                    const ticket = fnCall.args;
+
+                    // Save ticket JSON as assistant response in history
+                    conversations[user_id].push({
+                        role: "model",
+                        parts: [{ text: JSON.stringify(ticket) }],
+                    });
+
                     return res.json({
-                        reply:
-                            "I’ve created a ticket for your issue. Here are the details:",
-                        ticket: args,
+                        reply: "I’ve created a ticket for your issue. Here are the details:",
+                        ticket,
                         timestamp: new Date().toISOString(),
                     });
                 }
             }
 
             // Otherwise just return a normal reply
+            const reply = response.text();
+
+            // Save assistant reply in history
+            conversations[user_id].push({ role: "model", parts: [{ text: reply }] });
+
             return res.json({
-                reply: response.text(),
+                reply,
                 ticket: null,
                 timestamp: new Date().toISOString(),
             });
@@ -77,4 +105,4 @@ module.exports.setupChatbotRoutes = (app) => {
             res.status(500).json({ error: "Chatbot failed" });
         }
     });
-}
+};
