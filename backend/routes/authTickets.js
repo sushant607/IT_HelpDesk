@@ -84,8 +84,9 @@ router.get('/', authenticate, async (req, res) => {
     let tickets = await Ticket.find(filter)
       .populate('createdBy', 'name email role department')
       .populate('assignedTo', 'name email role department')
-      .sort({ createdAt: -1 });
-
+      .populate('comments.author','name')
+   .sort({ createdAt: -1 });
+console.log(tickets[2].comments);
     if(keywords){
       const keywordArray = keywords.split('+');
       tickets = tickets.filter((ticket) => {
@@ -255,8 +256,11 @@ router.get('/:id', authenticate, async (req, res) => {
   
       const ticket = await Ticket.findById(id)
         .populate('createdBy', 'name email role department')
-        .populate('assignedTo', 'name email role department');
-  
+        .populate('assignedTo', 'name email role department')
+        .populate(  "comments.author", "name");
+
+  console.log(ticket.comments);
+
       if (!ticket) {
         return res.status(404).json({ msg: 'not_found' });
       }

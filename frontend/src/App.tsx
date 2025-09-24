@@ -52,7 +52,7 @@ const App = () => (
             <Route index element={<DashboardPage />} />
             <Route path="tickets" element={<MyTicketsPage />} />
             <Route path="tickets/new" element={<NewTicketPage />} />
-            <Route path="tickets/:ticketId" element={<TicketDetailsPage />} />
+            <Route path="tickets/:id" element={<TicketDetailsPage />} />
             <Route path="all-tickets" element={
               <RoleBasedRoute allowedRoles={["manager"]}>
                 <AllTicketsPage />

@@ -12,6 +12,13 @@ import { ArrowLeft, Edit, Save, X, Calendar, User, Tag, Flag, Clock } from "luci
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
 
+interface Comment {
+  _id: string;
+  author: { _id: string; name: string };
+  message: string;
+  createdAt: string;
+}
+
 interface TicketData {
   id: string;
   title: string;
@@ -21,12 +28,14 @@ interface TicketData {
   priority: "low" | "medium" | "high" | "urgent";
   createdAt: string;
   updatedAt: string;
-  assignee?: string;
-  createdBy?: string;
+  assignedToName?: string;
+  createdByName?: string;
+  comments:Comment[],
+  attachments:string[]
 }
 
 export default function TicketDetailsPage() {
-  const { ticketId } = useParams();
+  const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [ticket, setTicket] = useState<TicketData | null>(null);
@@ -46,64 +55,66 @@ export default function TicketDetailsPage() {
     "Mike Chen", "Lisa Park", "Alex Rodriguez", "Emma Thompson"
   ];
 
-  useEffect(() => {
-    // Mock ticket loading - In real app, fetch from Supabase
-    const mockTickets: TicketData[] = [
-      {
-        id: "T001",
-        title: "Password Reset Request",
-        description: "Unable to access company email account after password expiration. The password reset link sent to my personal email doesn't seem to work. I've tried multiple times and even checked spam folder. Need urgent assistance as I have important client emails to respond to.",
-        category: "Account Access",
-        status: "resolved",
-        priority: "medium",
-        createdAt: "2024-01-15",
-        updatedAt: "2024-01-16",
-        assignee: "John Doe",
-        createdBy: "user@company.com"
-      },
-      {
-        id: "T002",
-        title: "Software Installation Issue",
-        description: "Need Adobe Creative Suite installed on my workstation for design projects. The current version is outdated and missing several tools required for the new campaign. Installation attempts have failed with error code 1603.",
-        category: "Software",
-        status: "in-progress",
-        priority: "high",
-        createdAt: "2024-01-18",
-        updatedAt: "2024-01-20",
-        assignee: "Jane Smith",
-        createdBy: "designer@company.com"
-      },
-      {
-        id: "T003",
-        title: "VPN Connection Problems",
-        description: "Cannot connect to company VPN from home office. Getting timeout errors consistently. This is blocking my ability to access internal resources and complete my work remotely.",
-        category: "Network",
-        status: "open",
-        priority: "medium",
-        createdAt: "2024-01-20",
-        updatedAt: "2024-01-20",
-        createdBy: "remote@company.com"
-      },
-      {
-        id: "T004",
-        title: "Laptop Performance Issues",
-        description: "Work laptop running very slow, frequent freezing during video calls. This started after the last Windows update. Performance monitoring shows high CPU usage even with minimal applications running.",
-        category: "Hardware",
-        status: "open",
-        priority: "high",
-        createdAt: "2024-01-21",
-        updatedAt: "2024-01-21",
-        createdBy: "employee@company.com"
+    useEffect(() => {
+    const fetchTicket = async () => {
+      try {
+        const token = localStorage.getItem("auth_token");
+        const res = await fetch(`http://localhost:5000/api/tickets/${id}`, {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        });
+
+        const txt = await res.text();
+        let data;
+        try { data = JSON.parse(txt); } catch { data = txt; }
+
+        if (!res.ok) {
+          const msg = typeof data === "string"
+            ? data
+            : data?.msg || `Request failed with ${res.status}`;
+          throw new Error(msg);
+        }
+
+        // Accept either a single ticket object or { ticket: {...} }
+        let t = null;
+        if (data && typeof data === "object" && !Array.isArray(data)) {
+          if (data.ticket) {
+            t = data.ticket;
+          } else {
+            t = data;
+          }
+        }
+
+        if (!t) {
+          console.error("Unexpected payload for /tickets/:id:", data);
+          setTicket(null);
+          return;
+        }
+
+        // Map API object to UI shape
+        setTicket({
+          id: t._id,
+          title: t.title,
+          description: t.description ?? "",
+          category: t.department ?? "General",
+          status: t.status === "in_progress" ? "in-progress" : t.status,
+          priority: t.priority,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          createdByName: t?.createdBy?.name,
+          assignedToName: t?.assignedTo?.name,
+          comments:t?.comments,
+          attachments:t?.attachments
+        });
+      } catch (e) {
+        console.error("Failed to load ticket:", e);
+        setTicket(null);
       }
-    ];
-
-    const foundTicket = mockTickets.find(t => t.id === ticketId);
-    if (foundTicket) {
-      setTicket(foundTicket);
-      setFormData(foundTicket);
-    }
-  }, [ticketId]);
-
+    };
+    if (id) fetchTicket();
+  }, [id]);
   const getStatusColor = (status: string) => {
     switch (status) {
       case "open": return "bg-blue-500 hover:bg-blue-600 text-white";
@@ -134,7 +145,7 @@ export default function TicketDetailsPage() {
 
   const canEdit = () => {
     if (userRole === "manager") return true;
-    if (ticket?.status === "open" && ticket?.createdBy === userEmail) return true;
+    if (ticket?.status === "open" && ticket?.createdByName === userEmail) return true;
     return false;
   };
 
@@ -375,8 +386,8 @@ export default function TicketDetailsPage() {
                         <Label htmlFor="assignee">Assigned To</Label>
                         {isEditing ? (
                           <Select
-                            value={formData.assignee || "unassigned"}
-                            onValueChange={(value) => setFormData({...formData, assignee: value === "unassigned" ? undefined : value})}
+                            value={formData.assignedToName || "unassigned"}
+                            onValueChange={(value) => setFormData({...formData, assignedToName: value === "unassigned" ? undefined : value})}
                           >
                             <SelectTrigger>
                               <SelectValue />
@@ -393,7 +404,7 @@ export default function TicketDetailsPage() {
                         ) : (
                           <div className="flex items-center gap-2">
                             <User className="w-4 h-4 text-muted-foreground" />
-                            <span>{ticket.assignee || "Unassigned"}</span>
+                            <span>{ticket.assignedToName || "Unassigned"}</span>
                           </div>
                         )}
                       </div>
@@ -401,6 +412,8 @@ export default function TicketDetailsPage() {
                   </div>
                 </>
               )}
+
+
             </CardContent>
           </Card>
         </div>
@@ -433,20 +446,73 @@ export default function TicketDetailsPage() {
                   </span>
                 </div>
 
-                {ticket.createdBy && (
+                {ticket.createdByName && (
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground flex items-center gap-1">
                       <User className="w-3 h-3" />
                       Reporter
                     </span>
                     <span className="font-medium text-xs">
-                      {ticket.createdBy}
+                      {ticket.createdByName}
                     </span>
                   </div>
                 )}
               </div>
             </CardContent>
           </Card>
+
+{/* Comments Section */}
+<Card className="bg-gradient-card border-0 shadow-lg">
+  <CardHeader>
+    <CardTitle className="text-lg">Comments</CardTitle>
+  </CardHeader>
+  <CardContent className="space-y-4">
+    {ticket.comments && ticket.comments.length > 0 ? (
+      ticket.comments.map((comment) => (
+        <div key={comment._id} className="border-b pb-3">
+          <p className="text-sm">
+            <span className="font-semibold">
+              {comment.author?.name || "Unknown User"}:
+            </span>{" "}
+            {comment.message}
+          </p>
+          <span className="text-xs text-muted-foreground">
+            {new Date(comment.createdAt).toLocaleString()}
+          </span>
+        </div>
+      ))
+    ) : (
+      <p className="text-sm text-muted-foreground">No comments yet</p>
+    )}
+  </CardContent>
+</Card>
+
+{/* Attachments Section */}
+<Card className="bg-gradient-card border-0 shadow-lg">
+  <CardHeader>
+    <CardTitle className="text-lg">Attachments</CardTitle>
+  </CardHeader>
+  <CardContent className="space-y-2">
+    {ticket.attachments && ticket.attachments.length > 0 ? (
+      <ul className="list-disc list-inside text-sm space-y-1">
+        {ticket.attachments.map((file, idx) => (
+          <li key={idx}>
+            <a
+              href={file}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              {file.split("/").pop()}
+            </a>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      <p className="text-sm text-muted-foreground">No attachments</p>
+    )}
+  </CardContent>
+</Card>
 
           <Card className="bg-gradient-card border-0 shadow-lg">
             <CardHeader>
