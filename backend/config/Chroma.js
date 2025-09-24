@@ -9,8 +9,8 @@ require("dotenv").config();
 // });
 
 const client = new CloudClient({
-  apiKey: 'ck-DrNZVwhE9P7JDumkDCaKfWWuPDYM1XZfr3A5J4UCEp1K',
-  tenant: '37dea777-55cb-4b80-be9b-11322059d954',
+  apiKey: process.env.CHROMA_API_KEY,
+  tenant:  process.env.CHROMA_TENANT,
   database: 'plate'
 });
 
