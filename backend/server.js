@@ -8,7 +8,6 @@ const authenticate = require('./middleware/auth');
 const ai = require('./ai');
 const uploadRoutes=require('./routes/uploadRoutes')
 const employees=require("./routes/employees")
-const uploadRoutes= require('./routes/uploadRoutes')
 const documentRoutes = require('./routes/documents')
 
 const app = express();
