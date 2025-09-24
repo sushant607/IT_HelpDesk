@@ -7,6 +7,7 @@ const connectDB = require('./config/db');
 const authenticate = require('./middleware/auth');
 const ai = require('./ai');
 const uploadRoutes=require('./routes/uploadRoutes')
+const employees=require("./routes/employees")
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use('/api/tickets', authenticate, require('./routes/authTickets')); // Use t
 app.use('/api/notifications', authenticate, require('./routes/notifications'));
 app.use('/api/gmail',  require('./routes/gmail'));
 app.use("/api/upload", uploadRoutes);
+app.use("/api",employees)
 
 // --- AI Chatbot Route ---
 app.use('/api/ai-chat', authenticate);

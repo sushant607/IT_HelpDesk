@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState,useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Card,
@@ -62,6 +62,8 @@ export default function NewTicketPage() {
   const [newComment, setNewComment] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [employees, setEmployees] = useState<{ _id: string; name: string }[]>([]);
+
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -249,6 +251,26 @@ if(uploadedAttachments&&formData.comments){
     }
   };
 
+  useEffect(() => {
+  const fetchEmployees = async () => {
+    if (userRole === "manager") {
+      try {
+        const res = await fetch(`http://localhost:5000/api/employees?department=${userDept}`, {
+          headers: { Authorization: token ? `Bearer ${token}` : "" },
+        });
+        const data = await res.json();
+        // assuming backend returns [{id, name}, ...]
+        console.log(data);
+        setEmployees(data);
+      } catch (err) {
+        console.error("Failed to load employees", err);
+      }
+    }
+  };
+  fetchEmployees();
+}, [userRole, userDept, token]);
+
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
@@ -358,6 +380,28 @@ if(uploadedAttachments&&formData.comments){
                     </Select>
                   </div>
                 </div>
+                  
+
+                  {userRole === "manager" && (
+  <div className="space-y-2">
+    <Label htmlFor="assignee">Assign To</Label>
+    <Select
+      value={formData.assignee}
+      onValueChange={(value) => handleInputChange("assignee", value)}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder="Select employee" />
+      </SelectTrigger>
+      <SelectContent>
+        {employees.map((emp) => (
+          <SelectItem key={emp._id} value={emp._id}>
+            {emp.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+)}
 
                 {/* Comments */}
                 <div className="space-y-2">
