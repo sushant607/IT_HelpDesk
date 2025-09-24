@@ -19,9 +19,9 @@ interface Comment {
   createdAt: string;
 }
 
-interface Attachment{
-  url:string,
-  filename:string
+interface Attachment {
+  url: string,
+  filename: string
 }
 
 interface TicketData {
@@ -33,10 +33,11 @@ interface TicketData {
   priority: "low" | "medium" | "high" | "urgent";
   createdAt: string;
   updatedAt: string;
+  tags?: string[];
   assignedToName?: string;
   createdByName?: string;
-  comments:Comment[],
-  attachments:Attachment[]
+  comments: Comment[],
+  attachments: Attachment[]
 }
 
 export default function TicketDetailsPage() {
@@ -60,7 +61,7 @@ export default function TicketDetailsPage() {
     "Mike Chen", "Lisa Park", "Alex Rodriguez", "Emma Thompson"
   ];
 
-    useEffect(() => {
+  useEffect(() => {
     const fetchTicket = async () => {
       try {
         const token = localStorage.getItem("auth_token");
@@ -91,6 +92,7 @@ export default function TicketDetailsPage() {
             t = data;
           }
         }
+        console.log(t.tags);
 
         if (!t) {
           console.error("Unexpected payload for /tickets/:id:", data);
@@ -108,10 +110,11 @@ export default function TicketDetailsPage() {
           priority: t.priority,
           createdAt: t.createdAt,
           updatedAt: t.updatedAt,
+          tags: t.tags ?? [],
           createdByName: t?.createdBy?.name,
           assignedToName: t?.assignedTo?.name,
-          comments:t?.comments,
-          attachments:t?.attachments
+          comments: t?.comments,
+          attachments: t?.attachments
         });
       } catch (e) {
         console.error("Failed to load ticket:", e);
@@ -165,21 +168,21 @@ export default function TicketDetailsPage() {
 
   const handleSave = async () => {
     if (!ticket) return;
-    
+
     setIsLoading(true);
     try {
       // Mock save - In real app, update in Supabase
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
       const updatedTicket = {
         ...ticket,
         ...formData,
         updatedAt: new Date().toISOString().split('T')[0]
       };
-      
+
       setTicket(updatedTicket);
       setIsEditing(false);
-      
+
       toast({
         title: "Ticket updated successfully",
         description: `Ticket ${ticket.id} has been updated.`,
@@ -273,7 +276,7 @@ export default function TicketDetailsPage() {
                   <Input
                     id="title"
                     value={formData.title || ""}
-                    onChange={(e) => setFormData({...formData, title: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   />
                 ) : (
                   <p className="text-lg font-medium">{ticket.title}</p>
@@ -289,7 +292,7 @@ export default function TicketDetailsPage() {
                   <Textarea
                     id="description"
                     value={formData.description || ""}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={6}
                   />
                 ) : (
@@ -308,7 +311,7 @@ export default function TicketDetailsPage() {
                   {isEditing ? (
                     <Select
                       value={formData.category || ""}
-                      onValueChange={(value) => setFormData({...formData, category: value})}
+                      onValueChange={(value) => setFormData({ ...formData, category: value })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -334,7 +337,7 @@ export default function TicketDetailsPage() {
                   {isEditing ? (
                     <Select
                       value={formData.priority || ""}
-                      onValueChange={(value) => setFormData({...formData, priority: value as any})}
+                      onValueChange={(value) => setFormData({ ...formData, priority: value as any })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -357,6 +360,24 @@ export default function TicketDetailsPage() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="tags">Tags</Label>
+                <div className="bg-muted/30 p-4 rounded-lg">
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                    {ticket.tags && ticket.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {ticket.tags.map((tag, idx) => (
+                          <Badge key={idx} variant="secondary" className="text-xs px-2 py-1">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">No tags</span>
+                    )}</p>
+                </div>
+              </div>
+
               {/* Manager-only fields */}
               {userRole === "manager" && (
                 <>
@@ -368,7 +389,7 @@ export default function TicketDetailsPage() {
                         {isEditing ? (
                           <Select
                             value={formData.status || ""}
-                            onValueChange={(value) => setFormData({...formData, status: value as any})}
+                            onValueChange={(value) => setFormData({ ...formData, status: value as any })}
                           >
                             <SelectTrigger>
                               <SelectValue />
@@ -392,7 +413,7 @@ export default function TicketDetailsPage() {
                         {isEditing ? (
                           <Select
                             value={formData.assignedToName || "unassigned"}
-                            onValueChange={(value) => setFormData({...formData, assignedToName: value === "unassigned" ? undefined : value})}
+                            onValueChange={(value) => setFormData({ ...formData, assignedToName: value === "unassigned" ? undefined : value })}
                           >
                             <SelectTrigger>
                               <SelectValue />
@@ -421,10 +442,10 @@ export default function TicketDetailsPage() {
 
             </CardContent>
           </Card>
-        </div>
+        </div >
 
         {/* Sidebar */}
-        <div className="space-y-6">
+        < div className="space-y-6" >
           <Card className="bg-gradient-card border-0 shadow-lg">
             <CardHeader>
               <CardTitle className="text-lg">Details</CardTitle>
@@ -466,61 +487,61 @@ export default function TicketDetailsPage() {
             </CardContent>
           </Card>
 
-{/* Comments Section */}
-<Card className="bg-gradient-card border-0 shadow-lg">
-  <CardHeader>
-    <CardTitle className="text-lg">Comments</CardTitle>
-  </CardHeader>
-  <CardContent className="space-y-4">
-    {ticket.comments && ticket.comments.length > 0 ? (
-      ticket.comments.map((comment) => (
-        <div key={comment._id} className="border-b pb-3">
-          <p className="text-sm">
-            <span className="font-semibold">
-              {comment.author?.name || "Unknown User"}:
-            </span>{" "}
-            {comment.message}
-          </p>
-          <span className="text-xs text-muted-foreground">
-            {new Date(comment.createdAt).toLocaleString()}
-          </span>
-        </div>
-      ))
-    ) : (
-      <p className="text-sm text-muted-foreground">No comments yet</p>
-    )}
-  </CardContent>
-</Card>
+          {/* Comments Section */}
+          <Card className="bg-gradient-card border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-lg">Comments</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {ticket.comments && ticket.comments.length > 0 ? (
+                ticket.comments.map((comment) => (
+                  <div key={comment._id} className="border-b pb-3">
+                    <p className="text-sm">
+                      <span className="font-semibold">
+                        {comment.author?.name || "Unknown User"}:
+                      </span>{" "}
+                      {comment.message}
+                    </p>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(comment.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">No comments yet</p>
+              )}
+            </CardContent>
+          </Card>
 
-{/* Attachments Section */}
-<Card className="bg-gradient-card border-0 shadow-lg">
-  <CardHeader>
-    <CardTitle className="text-lg">Attachments</CardTitle>
-  </CardHeader>
-  <CardContent className="space-y-2">
-    {ticket.attachments && ticket.attachments.length > 0 ? (
-      <ul className="list-disc list-inside text-sm space-y-1">
-       <ul>
-  {ticket.attachments.map((file, idx) => (
-    <li key={idx}>
-      <a
-        href={file.url}          // actual path to open
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-600 hover:underline"
-      >
-        {file.filename}        
-      </a>
-    </li>
-  ))}
-</ul>
+          {/* Attachments Section */}
+          <Card className="bg-gradient-card border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-lg">Attachments</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {ticket.attachments && ticket.attachments.length > 0 ? (
+                <ul className="list-disc list-inside text-sm space-y-1">
+                  <ul>
+                    {ticket.attachments.map((file, idx) => (
+                      <li key={idx}>
+                        <a
+                          href={file.url}          // actual path to open
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {file.filename}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
 
-      </ul>
-    ) : (
-      <p className="text-sm text-muted-foreground">No attachments</p>
-    )}
-  </CardContent>
-</Card>
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">No attachments</p>
+              )}
+            </CardContent>
+          </Card>
 
           <Card className="bg-gradient-card border-0 shadow-lg">
             <CardHeader>
@@ -537,8 +558,8 @@ export default function TicketDetailsPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
-    </div>
+        </div >
+      </div >
+    </div >
   );
 }

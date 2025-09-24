@@ -159,9 +159,9 @@ const connectGmailTool = tool(
     if (!req) throw new Error('Request context missing');
     const r = await fetch('http://localhost:5000/api/gmail/auth/url', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        Authorization: req.headers.authorization || '' 
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
       }
     });
     const text = await r.text();
@@ -183,9 +183,9 @@ const fetchGmailTool = tool(
     if (!req) throw new Error('Request context missing');
     const r = await fetch('http://localhost:5000/api/gmail/fetch', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        Authorization: req.headers.authorization || '' 
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
       },
       body: JSON.stringify({
         limit: input?.limit ?? 20,
@@ -219,9 +219,9 @@ const createTicketsFromGmailTool = tool(
     // 1. Fetch mails
     const fetchResp = await fetch('http://localhost:5000/api/gmail/fetch', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        Authorization: req.headers.authorization || '' 
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
       },
       body: JSON.stringify({
         limit: input?.limit ?? 20,
@@ -237,7 +237,7 @@ const createTicketsFromGmailTool = tool(
     const fetchJson = await fetchResp.json();
 
     // 2. Filter mails where subject contains "TICKET" (case insensitive)
-    const filtered = (fetchJson.candidates || []).filter(c => 
+    const filtered = (fetchJson.candidates || []).filter(c =>
       c.title && c.title.toLowerCase().includes('ticket')
     );
 
@@ -253,9 +253,9 @@ const createTicketsFromGmailTool = tool(
       };
       const ticketResp = await fetch('http://localhost:5000/api/tickets', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          Authorization: req.headers.authorization || '' 
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: req.headers.authorization || ''
         },
         body: JSON.stringify(ticketBody)
       });
@@ -300,28 +300,28 @@ const fetchMyTicketsTool = tool(
       if (input.status) query.append('status', input.status);
       if (input.priority) query.append('priority', input.priority);
       if (input.keywords?.length > 0) query.append('keywords', input.keywords.join('+'));
-      
+
       const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
         headers
       });
-      
+
       if (!response.ok) {
         throw new Error(`API Error: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
       const tickets = data.tickets || [];
-      
+
       if (tickets.length === 0) {
         return "No tickets found for you";
       }
-      
+
       const byStatus = tickets.reduce((acc, t) => {
         acc[t.status] = (acc[t.status] || 0) + 1;
         return acc;
       }, {});
-      
+
       const summary = `You have ${tickets.length} ticket(s):\n` +
         Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
 
@@ -353,39 +353,39 @@ const fetchTeamTicketsTool = tool(
       if (req.user.role !== 'manager' && req.user.role !== 'admin') {
         return "Sorry, only managers and admins can view team tickets.";
       }
-      
+
       console.log('🔧 Fetching team tickets...');
       const headers = { 'Authorization': req.headers.authorization };
       const query = new URLSearchParams({ scope: 'team' });
-      
+
       if (input.status) query.append('status', input.status);
       if (input.priority) query.append('priority', input.priority);
       if (input.keywords?.length > 0) query.append('keywords', input.keywords.join('+'));
-      
+
       const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
         headers
       });
-      
+
       if (!response.ok) {
         throw new Error(`API Error: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
       const tickets = data.tickets || [];
-      
+
       if (tickets.length === 0) {
         return "No tickets found for your team.";
       }
-      
+
       const byStatus = tickets.reduce((acc, t) => {
         acc[t.status] = (acc[t.status] || 0) + 1;
         return acc;
       }, {});
-      
+
       const summary = `Your team has ${tickets.length} ticket(s):\n` +
         Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
-      
+
       console.log('Team tickets fetched successfully');
       return summary;
     } catch (error) {
@@ -433,6 +433,8 @@ const createTicketTool = tool(
       title: z.string().optional(),
       description: z.string().optional(),
       priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+      tags: z.array(z.enum(['VPN', 'Database', 'Installation', 'General', 'Wifi/Ethernet', 'Authentication']))
+              .optional().describe("Tags describing the issue of the ticket, max 3"),
       department: z.enum([
         'support team A',
         'software team',
@@ -458,7 +460,7 @@ function setupChatbotRoutes(app) {
     connectGmail: connectGmailTool,
     // fetchMailAndCreateTickets: fetchMailAndCreateTicketsTool,
     fetchGmail: fetchGmailTool,
-    createTicketsFromGmail:createTicketsFromGmailTool
+    createTicketsFromGmail: createTicketsFromGmailTool
   };
 
   // Initialize LLM with tools
@@ -477,9 +479,9 @@ function setupChatbotRoutes(app) {
     }
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
-  
+
     appendHistory(userId, "user", message.trim());
-  
+
     try {
       const messages = buildMessages(userId, message);
 
@@ -495,23 +497,23 @@ function setupChatbotRoutes(app) {
         });
       }
       const response = await llm.invoke(messages, { configurable: { req } });
-  
+
       const toolCalls = response.tool_calls || [];
       if (toolCalls.length > 0) {
         const toolCall = toolCalls[0];
         const toolName = toolCall.name;
         const toolArgs = toolCall.args || {};
-      
+
         if (toolsMap[toolName]) {
           try {
             const toolResult = await toolsMap[toolName].invoke(toolArgs, {
               configurable: { req, rawUserMessage: message },
             });
-      
+
             const reply = typeof toolResult === 'string'
               ? toolResult
               : (toolResult?.summary || JSON.stringify(toolResult));
-      
+
             appendHistory(userId, 'assistant', reply);
             return res.json({ reply, toolUsed: toolName, timestamp: new Date().toISOString() });
           } catch (toolError) {
@@ -520,7 +522,7 @@ function setupChatbotRoutes(app) {
             return res.json({ reply: errorReply, error: toolError.message, timestamp: new Date().toISOString() });
           }
         }
-      }  
+      }
       const reply = typeof response.content === 'string'
         ? response.content
         : Array.isArray(response.content)
@@ -534,7 +536,7 @@ function setupChatbotRoutes(app) {
       return res.json({ reply, error: err.message, timestamp: new Date().toISOString() });
     }
   });
-  
+
   console.log('AI Chatbot setup complete');
 }
 

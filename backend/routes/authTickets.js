@@ -110,7 +110,7 @@ router.post('/', authenticate, async (req, res) => {
     try {
       const { title, description = '', priority, createdForUserId, assignedTo,comments,attachments } = req.body || {};
       const role = req.user.role;
-  
+      const tags = req.body.tags;
       // Basic input checks
       if (!title || !priority) {
         return res.status(400).json({ msg: 'title and priority required' });
@@ -159,6 +159,7 @@ router.post('/', authenticate, async (req, res) => {
         createdBy: targetUserId, // storing "created for" per existing field naming
         assignedTo: finalAssignedTo,
         department: targetUser.department,
+        tags,
         status: 'open',
         comments,
         attachments
