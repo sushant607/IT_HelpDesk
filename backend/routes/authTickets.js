@@ -115,7 +115,6 @@ router.post('/', authenticate, async (req, res) => {
       if (!title || !priority) {
         return res.status(400).json({ msg: 'title and priority required' });
       }
-      console.log("hehe")
       // Target user (defaults to self)
       const targetUserId = createdForUserId || req.user.id;
   
@@ -137,7 +136,6 @@ router.post('/', authenticate, async (req, res) => {
       if (!allowed) {
         return res.status(403).json({ msg: reason });
       }
-      console.log("booo");
   
       // Validate target user and get department
       const targetUser = await User.findById(targetUserId).select('department');
@@ -153,7 +151,6 @@ router.post('/', authenticate, async (req, res) => {
       if (!assigneeExists) {
         return res.status(400).json({ msg: 'assignee not found' });
       }
-      console.log("hi")
       // Create ticket (Model.create triggers save middleware)
       const doc = await Ticket.create({
         title,

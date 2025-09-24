@@ -152,6 +152,141 @@ function summarizeTicket(args, apiResult) {
 
 // === TOOL DEFINITIONS ===
 
+// Tool: Connect Gmail (returns authorize URL)
+const connectGmailTool = tool(
+  async (_input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context missing');
+    const r = await fetch('http://localhost:5000/api/gmail/auth/url', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        Authorization: req.headers.authorization || '' 
+      }
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(text);
+    const { url } = JSON.parse(text);
+    return `Open this link to connect Gmail: ${url}`;
+  },
+  {
+    name: 'connectGmail',
+    description: 'Generate a one-time Gmail consent URL for the current user.',
+    schema: z.object({})
+  }
+);
+
+// Tool: Fetch gmail mails (fetches recent mails)
+const fetchGmailTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context missing');
+    const r = await fetch('http://localhost:5000/api/gmail/fetch', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        Authorization: req.headers.authorization || '' 
+      },
+      body: JSON.stringify({
+        limit: input?.limit ?? 20,
+        windowDays: input?.windowDays ?? 7,
+        unreadOnly: input?.unreadOnly ?? true,
+        forceBootstrap: input?.forceBootstrap ?? false
+      })
+    });
+    const json = await r.json();
+    if (!r.ok) throw new Error(JSON.stringify(json));
+    return json;
+  },
+  {
+    name: 'fetchGmail',
+    description: 'Fetch recent Gmail messages as structured candidates via server-side integration.',
+    schema: z.object({
+      limit: z.number().min(1).max(50).optional(),
+      windowDays: z.number().min(1).max(30).optional(),
+      unreadOnly: z.boolean().optional(),
+      forceBootstrap: z.boolean().optional()
+    })
+  }
+);
+
+// Tool: Create tickets for mails with keyword "TICKET" in subject
+const createTicketsFromGmailTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context missing');
+
+    // 1. Fetch mails
+    const fetchResp = await fetch('http://localhost:5000/api/gmail/fetch', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json', 
+        Authorization: req.headers.authorization || '' 
+      },
+      body: JSON.stringify({
+        limit: input?.limit ?? 20,
+        windowDays: input?.windowDays ?? 7,
+        unreadOnly: input?.unreadOnly ?? true,
+        forceBootstrap: input?.forceBootstrap ?? false
+      })
+    });
+    if (!fetchResp.ok) {
+      const errText = await fetchResp.text();
+      throw new Error(errText);
+    }
+    const fetchJson = await fetchResp.json();
+
+    // 2. Filter mails where subject contains "TICKET" (case insensitive)
+    const filtered = (fetchJson.candidates || []).filter(c => 
+      c.title && c.title.toLowerCase().includes('ticket')
+    );
+
+    // 3. Create tickets for each filtered mail
+    const created = [];
+    for (const mail of filtered) {
+      const ticketBody = {
+        title: mail.title || 'Email ticket',
+        description: mail.description || '',
+        priority: input?.priority || 'medium',
+        department: input?.department,
+        assignedTo: input?.assignedTo
+      };
+      const ticketResp = await fetch('http://localhost:5000/api/tickets', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          Authorization: req.headers.authorization || '' 
+        },
+        body: JSON.stringify(ticketBody)
+      });
+      const ticketJson = await ticketResp.json();
+      if (!ticketResp.ok) {
+        throw new Error(JSON.stringify(ticketJson));
+      }
+      created.push(ticketJson);
+    }
+
+    return JSON.stringify({
+      total: filtered.length,
+      created: created.length,
+      tickets: created
+    });
+  },
+  {
+    name: 'createTicketsFromGmail',
+    description: 'Fetch Gmail mails containing "TICKET" in subject and create tickets.',
+    schema: z.object({
+      limit: z.number().min(1).max(50).optional(),
+      windowDays: z.number().min(1).max(30).optional(),
+      unreadOnly: z.boolean().optional(),
+      forceBootstrap: z.boolean().optional(),
+      priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+      department: z.enum(['support team A', 'software team', 'network team', 'infrastructure team', 'hardware team', 'database team']).optional(),
+      assignedTo: z.string().optional()
+    })
+  }
+);
+
 const fetchMyTicketsTool = tool(
   async (input, config) => {
     const req = config?.configurable?.req;
@@ -320,6 +455,10 @@ function setupChatbotRoutes(app) {
     fetchMyTickets: fetchMyTicketsTool,
     fetchTeamTickets: fetchTeamTicketsTool,
     createTicket: createTicketTool,
+    connectGmail: connectGmailTool,
+    // fetchMailAndCreateTickets: fetchMailAndCreateTicketsTool,
+    fetchGmail: fetchGmailTool,
+    createTicketsFromGmail:createTicketsFromGmailTool
   };
 
   // Initialize LLM with tools
@@ -328,7 +467,7 @@ function setupChatbotRoutes(app) {
     temperature: 0.1,
     apiKey: process.env.GOOGLE_API_KEY,
   }).withConfig({
-    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, createTicketTool]
+    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, createTicketTool, connectGmailTool, fetchGmailTool, createTicketsFromGmailTool]
   });
 
   app.post("/api/ai-chat", async (req, res) => {

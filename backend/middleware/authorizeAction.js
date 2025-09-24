@@ -31,7 +31,7 @@ async function canCreateTicket(req, createdForUserId, assignedToUserId) {
   const { role, department, id: creatorId } = req.user;
   
   const createdForUser = await User.findById(createdForUserId).select('department');
-  console.log(department);
+
   // Employee restrictions
   if (role === 'employee') {
     // Must create for self only
@@ -55,7 +55,6 @@ async function canCreateTicket(req, createdForUserId, assignedToUserId) {
     if (!createdForUser) {
       return { allowed: false, reason: 'Created-for user not found' };
     }
-    console.log('Hi'+ createdForUser.department);
     if (createdForUser.department !== department) {
       return { allowed: false, reason: 'Cannot create tickets for users outside your department' };
     }
