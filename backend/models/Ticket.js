@@ -2,13 +2,21 @@ const mongoose = require('mongoose');
 
 const CommentSchema = new mongoose.Schema({
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  message: String,
+  message:{type:String},
   createdAt: { type: Date, default: Date.now }
 });
 
+const AttachmentSchema=
+ new mongoose.Schema({
+  
+  filename:{type:String},
+  url: { type: String}
+});
+
+
 const TicketSchema = new mongoose.Schema({
   title: { type: String, required: true },
-  description: String,
+  description: {type:String},
   status: { 
     type: String, 
     enum: ['open', 'in_progress', 'closed','resolved'], 
@@ -23,7 +31,7 @@ const TicketSchema = new mongoose.Schema({
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
   // NEW: department assignment
-  department: { 
+  department: {
     type: String, 
     enum: [
       'support team A',
@@ -37,7 +45,7 @@ const TicketSchema = new mongoose.Schema({
   },
 
   comments: [CommentSchema],
-  attachments: [String],
+  attachments: [AttachmentSchema],
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
   storyPoints: {type: Number, default: 1}

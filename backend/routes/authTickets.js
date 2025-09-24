@@ -108,7 +108,7 @@ console.log(tickets[2].comments);
 // POST /api/tickets
 router.post('/', authenticate, async (req, res) => {
     try {
-      const { title, description = '', priority, createdForUserId, assignedTo } = req.body || {};
+      const { title, description = '', priority, createdForUserId, assignedTo,comments,attachments } = req.body || {};
       const role = req.user.role;
   
       // Basic input checks
@@ -160,6 +160,8 @@ router.post('/', authenticate, async (req, res) => {
         assignedTo: finalAssignedTo,
         department: targetUser.department,
         status: 'open',
+        comments,
+        attachments
       });
       console.log(doc)
       return res.status(201).json({

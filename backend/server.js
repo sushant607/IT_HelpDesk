@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const connectDB = require('./config/db');
 const authenticate = require('./middleware/auth');
 const ai = require('./ai');
+const uploadRoutes=require('./routes/uploadRoutes')
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/tickets', authenticate, require('./routes/authTickets')); // Use the secure ticket routes
 app.use('/api/notifications', authenticate, require('./routes/notifications'));
 app.use('/api/gmail',  require('./routes/gmail'));
+app.use("/api/upload", uploadRoutes);
 
 // --- AI Chatbot Route ---
 app.use('/api/ai-chat', authenticate);
@@ -37,6 +39,8 @@ ai.setupChatbotRoutes(app);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+
 
 // --- Server Startup ---
 const PORT = process.env.PORT || 5000;

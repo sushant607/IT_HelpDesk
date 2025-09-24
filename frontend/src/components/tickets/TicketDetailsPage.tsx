@@ -19,6 +19,11 @@ interface Comment {
   createdAt: string;
 }
 
+interface Attachment{
+  url:string,
+  filename:string
+}
+
 interface TicketData {
   id: string;
   title: string;
@@ -31,7 +36,7 @@ interface TicketData {
   assignedToName?: string;
   createdByName?: string;
   comments:Comment[],
-  attachments:string[]
+  attachments:Attachment[]
 }
 
 export default function TicketDetailsPage() {
@@ -495,18 +500,21 @@ export default function TicketDetailsPage() {
   <CardContent className="space-y-2">
     {ticket.attachments && ticket.attachments.length > 0 ? (
       <ul className="list-disc list-inside text-sm space-y-1">
-        {ticket.attachments.map((file, idx) => (
-          <li key={idx}>
-            <a
-              href={file}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
-            >
-              {file.split("/").pop()}
-            </a>
-          </li>
-        ))}
+       <ul>
+  {ticket.attachments.map((file, idx) => (
+    <li key={idx}>
+      <a
+        href={file.url}          // actual path to open
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-600 hover:underline"
+      >
+        {file.filename}        
+      </a>
+    </li>
+  ))}
+</ul>
+
       </ul>
     ) : (
       <p className="text-sm text-muted-foreground">No attachments</p>

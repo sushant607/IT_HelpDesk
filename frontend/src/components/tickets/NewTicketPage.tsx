@@ -1,21 +1,44 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ArrowLeft, Save, Loader2, Ticket } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { log } from "console";
 
+interface Comment{
+  author:string,
+  message:string
+}
 interface TicketFormData {
   title: string;
   description: string;
   department: string;
   priority: "low" | "medium" | "high" | "urgent";
-  assignee?: string; // employee userId for manager/admin
+  assignee?: string;
+  comments: Comment[];
+  attachments: File[];
+}
+interface UploadedAttachment {
+  filename: string;
+  url: string;
 }
 
 type DeptUser = {
@@ -30,18 +53,18 @@ export default function NewTicketPage() {
   const [formData, setFormData] = useState<TicketFormData>({
     title: "",
     description: "",
-    department: "",
+    department: localStorage.getItem("user_department") || "",
     priority: "medium",
     assignee: undefined,
+    comments: [],
+    attachments: [],
   });
-  const [deptEmployees, setDeptEmployees] = useState<DeptUser[]>([]);
-  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [newComment, setNewComment] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Read role/department/id/token from localStorage as requested
   const token = localStorage.getItem("auth_token") || "";
   const userRole = localStorage.getItem("user_role") || "employee";
   const userId = localStorage.getItem("user_id") || "";
@@ -56,47 +79,36 @@ export default function NewTicketPage() {
     "Infrastructure",
     "Database",
     "Security",
-    "Other"
+    "Other",
   ];
 
-  // // Pre-fill department; load department employees for manager/admin
-  // useEffect(() => {
-  //   if (userDept) {
-  //     setFormData(prev => ({ ...prev, department: userDept }));
-  //   }
-  //   if ((userRole === "manager" || userRole === "admin") && userDept) {
-  //     const loadDeptEmployees = async () => {
-  //       try {
-  //         setLoadingEmployees(true);
-  //         setError("");
-  //         // Use an existing users endpoint you already have. If your backend returns { users: [...] },
-  //         // the parsing below handles both array and object-wrapped array.
-  //         const url = `http://localhost:5000/api/users?department=${encodeURIComponent(userDept)}&role=employee`;
-  //         const res = await fetch(url, {
-  //           headers: { Authorization: token ? `Bearer ${token}` : "" },
-  //         });
-  //         const txt = await res.text();
-  //         let data: unknown;
-  //         try { data = JSON.parse(txt); } catch { data = txt; }
-  //         if (!res.ok) throw new Error(typeof data === "string" ? data : (data as any)?.msg || "Failed to load employees");
-
-  //         const list = Array.isArray(data) ? data : Array.isArray((data as any)?.users) ? (data as any).users : [];
-  //         setDeptEmployees((list as DeptUser[]).filter(u => u.role === "employee"));
-  //       } catch (e: any) {
-  //         setError(e.message || "Failed to load employees");
-  //         setDeptEmployees([]);
-  //       } finally {
-  //         setLoadingEmployees(false);
-  //       }
-  //     };
-  //     loadDeptEmployees();
-  //   }
-  // }, [userRole, userDept, token]);
-
   const handleInputChange = (field: keyof TicketFormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
     setError("");
   };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setFormData((prev) => ({
+        ...prev,
+        attachments: [...prev.attachments, ...Array.from(e.target.files!)],
+      }));
+    }
+  };
+
+const handleAddComment = () => {
+  if (newComment.trim()) {
+    setFormData((prev) => ({
+      ...prev,
+      comments: [
+        ...prev.comments,
+        { message: newComment.trim(), author: userId } 
+      ],
+    }));
+    setNewComment("");
+  }
+};
+
 
   const validateForm = () => {
     if (!formData.title.trim()) {
@@ -111,10 +123,6 @@ export default function NewTicketPage() {
       setError("Please select a department");
       return false;
     }
-    // if ((userRole === "manager" || userRole === "admin") && !formData.assignee) {
-    //   setError("Please select an assignee from your department");
-    //   return false;
-    // }
     return true;
   };
 
@@ -126,34 +134,101 @@ export default function NewTicketPage() {
     setError("");
 
     try {
-      // Build payload: backend derives department from createdForUserId target user;
-      // employees are self-assigned server-side; managers/admins must include assignedTo
-      const payload: any = {
-        title: formData.title,
-        description: formData.description,
-        priority: formData.priority,
-        createdForUserId: userId,
-      };
-      if (userRole === "manager" || userRole === "admin") {
-        payload.assignedTo ='68d2a2fef8a04c067b7b7c27';
-      }
+      const uploadedAttachments: UploadedAttachment[] = [];
 
-      const res = await fetch("http://localhost:5000/api/tickets", {
+  for (const file of formData.attachments) {
+    const uploadForm = new FormData();
+    uploadForm.append("file", file);
+
+    const uploadRes = await fetch("http://localhost:5000/api/upload", {
+      method: "POST",
+      headers: {
+        "Authorization": token ? `Bearer ${token}` : "",
+      },
+      body: uploadForm,
+    });
+
+
+    if (!uploadRes.ok) throw new Error("File upload failed");
+    const uploadData = await uploadRes.json();
+
+    console.log(uploadData);
+
+    uploadedAttachments.push({
+      url:uploadData.url,
+      filename: uploadData.filename,
+    }
+     
+     
+    );
+  }
+      
+    
+
+    
+
+console.log("Form Data:", formData.comments);
+
+
+  // Step 2: Now send ticket data with attachment info
+  const ticketBody = {
+    title: formData.title,
+    description: formData.description,
+    priority: formData.priority,
+    createdForUserId: userId,
+    department: formData.department,
+    assignedTo:
+      userRole === "manager" || userRole === "admin" ? formData.assignee : null,
+    comments: formData.comments,
+    attachments:uploadedAttachments , // store uploaded URLs + IDs
+  };
+      // Using FormData because of file uploads
+      // const formDataToSend = new FormData();
+      // formDataToSend.append("title", formData.title);
+      // formDataToSend.append("description", formData.description);
+      // formDataToSend.append("priority", formData.priority);
+      // formDataToSend.append("createdForUserId", userId);
+      // formDataToSend.append("department", formData.department);
+
+      // if (userRole === "manager" || userRole === "admin") {
+      //   formDataToSend.append("assignedTo", formData.assignee || "");
+      // }
+
+      // formData.comments.forEach((c, i) =>
+      //   formDataToSend.append(`comments[${i}]`, c)
+      // );
+
+      // formData.attachments.forEach((file) =>
+      //   formDataToSend.append("attachments", file)
+      // );
+console.log(ticketBody);
+if(uploadedAttachments&&formData.comments){
+   const res = await fetch("http://localhost:5000/api/tickets", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
+           "Content-Type": "application/json", 
+          "Authorization": token ? `Bearer ${token}` : "",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(ticketBody),
       });
 
-      const txt = await res.text();
+       const txt = await res.text();
       let data: any;
-      try { data = JSON.parse(txt); } catch { data = txt; }
+      try {
+        data = JSON.parse(txt);
+      } catch {
+        data = txt;
+      }
 
       if (!res.ok) {
-        throw new Error(typeof data === "string" ? data : (data?.msg || "Failed to create ticket"));
+        throw new Error(
+          typeof data === "string" ? data : data?.msg || "Failed to create ticket"
+        );
       }
+
+     
+
+     
 
       const ticketId = data?.ticket_id || data?._id || "created";
       toast({
@@ -166,6 +241,7 @@ export default function NewTicketPage() {
       } else {
         navigate("/dashboard/tickets");
       }
+    }
     } catch (err: any) {
       setError(err.message || "Failed to create ticket. Please try again.");
     } finally {
@@ -190,7 +266,9 @@ export default function NewTicketPage() {
               Back
             </Button>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">Create New Ticket</h1>
+              <h1 className="text-3xl font-bold tracking-tight">
+                Create New Ticket
+              </h1>
               <p className="text-muted-foreground mt-2">
                 Submit a new IT support request
               </p>
@@ -220,7 +298,9 @@ export default function NewTicketPage() {
                     id="title"
                     placeholder="Brief description of the issue"
                     value={formData.title}
-                    onChange={(e) => handleInputChange("title", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("title", e.target.value)
+                    }
                     required
                   />
                 </div>
@@ -230,41 +310,41 @@ export default function NewTicketPage() {
                   <Label htmlFor="description">Description *</Label>
                   <Textarea
                     id="description"
-                    placeholder="Detailed description of the issue, including steps to reproduce, error messages, and any other relevant information..."
+                    placeholder="Detailed description..."
                     value={formData.description}
-                    onChange={(e) => handleInputChange("description", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("description", e.target.value)
+                    }
                     rows={5}
                     required
                   />
                 </div>
 
-                {/* Category and Priority Row */}
+                {/* Department & Priority */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="department">Department *</Label>
-                    <Select
-                      value={formData.department}
-                      onValueChange={(value) => handleInputChange("department", value)}
-                      required
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a department" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {departments.map(department => (
-                          <SelectItem key={department} value={department}>
-                            {department}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                 
+                  
+                 
+  <Input
+    id="department"
+    value={formData.department}
+    readOnly
+  />
+
+
+
+                   
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="priority">Priority</Label>
                     <Select
                       value={formData.priority}
-                      onValueChange={(value) => handleInputChange("priority", value as any)}
+                      onValueChange={(value) =>
+                        handleInputChange("priority", value as any)
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -279,30 +359,48 @@ export default function NewTicketPage() {
                   </div>
                 </div>
 
-                {/* Manager/Admin: Assign To within department */}
-                {(userRole === "manager" || userRole === "admin") && (
-                  <div className="space-y-2">
-                    <Label htmlFor="assignee">Assign To (department employees)</Label>
-                    <Select
-                      value={formData.assignee}
-                      onValueChange={(value) => handleInputChange("assignee", value)}
-                      disabled={loadingEmployees}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={loadingEmployees ? "Loading..." : "Select team member"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {deptEmployees.map(member => (
-                          <SelectItem key={member._id} value={member._id}>
-                            {member.name} ({member.email})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                {/* Comments */}
+                <div className="space-y-2">
+                  <Label>Comments</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Add a comment"
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                    />
+                    <Button type="button" onClick={handleAddComment}>
+                      Add
+                    </Button>
                   </div>
-                )}
+                  {formData.comments.length > 0 && (
+                    <ul className="list-disc list-inside text-sm">
+                      {formData.comments.map((c, idx) => (
+                        <li key={idx}>{c.message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
 
-                {/* Submit Button */}
+                {/* Attachments */}
+                <div className="space-y-2">
+                  <Label htmlFor="attachments">Attachments</Label>
+                  <Input
+                    type="file"
+                    id="attachments"
+                    multiple
+                    accept="image/*"
+                    onChange={handleFileChange}
+                  />
+                  {formData.attachments.length > 0 && (
+                    <ul className="text-sm mt-2">
+                      {formData.attachments.map((file, idx) => (
+                        <li key={idx}>{file.name}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Submit */}
                 <div className="flex justify-end gap-3 pt-6 border-t">
                   <Button
                     type="button"
@@ -315,7 +413,7 @@ export default function NewTicketPage() {
                   <Button
                     type="submit"
                     disabled={isLoading}
-                    className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
+                    className="bg-gradient-primary"
                   >
                     {isLoading ? (
                       <>
@@ -347,7 +445,8 @@ export default function NewTicketPage() {
                 <div className="space-y-2">
                   <h3 className="text-2xl font-bold">Need Help?</h3>
                   <p className="text-muted-foreground max-w-xs">
-                    Our IT support team is here to help you resolve any technical issues quickly and efficiently.
+                    Our IT support team is here to help you resolve any technical
+                    issues quickly and efficiently.
                   </p>
                 </div>
               </div>
