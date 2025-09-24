@@ -250,7 +250,7 @@ export default function MyTicketsPage() {
           <h1 className="text-3xl font-bold">My Tickets</h1>
           <p className="text-muted-foreground">
             Track and manage your support requests
-            {isManager && <span className="ml-2 text-amber-600 font-medium">(Manager View)</span>}
+            {/* {isManager && <span className="ml-2 text-amber-600 font-medium">(Manager View)</span>} */}
           </p>
         </div>
         <Button onClick={() => navigate("/tickets/new")} className="bg-gradient-primary hover:shadow-glow transition-all duration-300">
@@ -308,7 +308,7 @@ export default function MyTicketsPage() {
       </Card>
 
       {/* Debug Info - Remove in production */}
-      {process.env.NODE_ENV === 'development' && (
+      {/* {process.env.NODE_ENV === 'development' && (
         <Card className="bg-gray-50">
           <CardContent className="p-4">
             <p className="text-sm">
@@ -318,7 +318,7 @@ export default function MyTicketsPage() {
             </p>
           </CardContent>
         </Card>
-      )}
+      )} */}
 
       {/* Tickets List */}
       <div className="space-y-4">

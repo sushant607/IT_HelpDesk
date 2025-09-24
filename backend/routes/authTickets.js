@@ -19,6 +19,346 @@ async function countTicketsAssignedToUser(userId) {
   return await Ticket.countDocuments({ assignedTo: userId });
 }
 
+// GET /api/tickets/analytics/tags - Get tag-wise ticket analytics
+router.get('/analytics/tags', authenticate, async (req, res) => {
+  try {
+    const { timeframe = '30' } = req.query; // Days to look back (default 30)
+    
+    // Calculate date filter
+    const daysBack = parseInt(timeframe) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+    
+    // Base filter for tickets within timeframe
+    const baseFilter = {
+      createdAt: { $gte: startDate }
+    };
+    
+    // Role-based filtering
+    if (req.user.role === 'employee') {
+      // Employees see only tickets they created or are assigned to
+      baseFilter.$or = [
+        { createdBy: new mongoose.Types.ObjectId(req.user.id) },
+        { assignedTo: new mongoose.Types.ObjectId(req.user.id) }
+      ];
+    } else if (req.user.role === 'manager') {
+      // Managers see tickets from their department
+      baseFilter.department = req.user.department;
+    }
+    // Admins see all tickets (no additional filter)
+    
+    // Aggregation pipeline for tag analytics
+    const analytics = await Ticket.aggregate([
+      { $match: baseFilter },
+      // Unwind the tags array to process each tag separately
+      { $unwind: { path: '$tags', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: {
+            tag: { $ifNull: ['$tags', 'Untagged'] },
+            status: '$status',
+            priority: '$priority'
+          },
+          count: { $sum: 1 },
+          tickets: { 
+            $push: {
+              _id: '$_id',
+              title: '$title',
+              status: '$status',
+              priority: '$priority',
+              department: '$department',
+              createdAt: '$createdAt'
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id.tag',
+          totalTickets: { $sum: '$count' },
+          statusBreakdown: {
+            $push: {
+              status: '$_id.status',
+              count: '$count'
+            }
+          },
+          priorityBreakdown: {
+            $push: {
+              priority: '$_id.priority',
+              count: '$count'
+            }
+          },
+          recentTickets: {
+            $push: {
+              $slice: ['$tickets', 3] // Recent 3 tickets per tag
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          tag: '$_id',
+          totalTickets: 1,
+          statusBreakdown: {
+            $arrayToObject: {
+              $map: {
+                input: '$statusBreakdown',
+                as: 'status',
+                in: { k: '$$status.status', v: '$$status.count' }
+              }
+            }
+          },
+          priorityBreakdown: {
+            $arrayToObject: {
+              $map: {
+                input: '$priorityBreakdown', 
+                as: 'priority',
+                in: { k: '$$priority.priority', v: '$$priority.count' }
+              }
+            }
+          },
+          recentTickets: {
+            $reduce: {
+              input: '$recentTickets',
+              initialValue: [],
+              in: { $concatArrays: ['$$value', '$$this'] }
+            }
+          }
+        }
+      },
+      { $sort: { totalTickets: -1 } }
+    ]);
+    
+    // Summary statistics
+    const summary = {
+      totalTags: analytics.length,
+      totalTickets: analytics.reduce((sum, tag) => sum + tag.totalTickets, 0),
+      timeframe: daysBack,
+      generatedAt: new Date()
+    };
+    
+    return res.json({
+      success: true,
+      summary,
+      tags: analytics
+    });
+    
+  } catch (error) {
+    console.error('GET /tickets/analytics/tags error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      msg: 'Error fetching tag analytics' 
+    });
+  }
+});
+
+// GET /api/tickets/analytics/manager-tags - Get manager-specific tag analytics
+router.get('/analytics/manager-tags', authenticate, async (req, res) => {
+  try {
+    const { timeframe = '30' } = req.query;
+    
+    // Calculate date filter
+    const daysBack = parseInt(timeframe) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+    
+    // Manager-specific filter: department tickets OR created by manager
+    const managerFilter = {
+      createdAt: { $gte: startDate },
+      $or: [
+        { department: req.user.department }, // Department tickets
+        { createdBy: new mongoose.Types.ObjectId(req.user.id) } // Manager's own tickets
+      ]
+    };
+    
+    // Aggregation pipeline for manager tag analytics
+    const analytics = await Ticket.aggregate([
+      { $match: managerFilter },
+      // Unwind tags array
+      { $unwind: { path: '$tags', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: {
+            tag: { $ifNull: ['$tags', 'Untagged'] },
+            status: '$status',
+            priority: '$priority',
+            source: {
+              $cond: [
+                { $eq: ['$createdBy', new mongoose.Types.ObjectId(req.user.id)] },
+                'created_by_me',
+                'department'
+              ]
+            }
+          },
+          count: { $sum: 1 },
+          tickets: { 
+            $push: {
+              _id: '$_id',
+              title: '$title',
+              status: '$status',
+              priority: '$priority',
+              department: '$department',
+              createdAt: '$createdAt',
+              assignedTo: '$assignedTo'
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id.tag',
+          totalTickets: { $sum: '$count' },
+          departmentTickets: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.source', 'department'] }, '$count', 0]
+            }
+          },
+          myTickets: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.source', 'created_by_me'] }, '$count', 0]
+            }
+          },
+          statusBreakdown: {
+            $push: {
+              status: '$_id.status',
+              count: '$count'
+            }
+          },
+          priorityBreakdown: {
+            $push: {
+              priority: '$_id.priority',
+              count: '$count'
+            }
+          },
+          recentTickets: {
+            $push: { $slice: ['$tickets', 3] }
+          }
+        }
+      },
+      {
+        $project: {
+          tag: '$_id',
+          totalTickets: 1,
+          departmentTickets: 1,
+          myTickets: 1,
+          statusBreakdown: {
+            $arrayToObject: {
+              $map: {
+                input: '$statusBreakdown',
+                as: 'status',
+                in: { k: '$$status.status', v: '$$status.count' }
+              }
+            }
+          },
+          priorityBreakdown: {
+            $arrayToObject: {
+              $map: {
+                input: '$priorityBreakdown', 
+                as: 'priority',
+                in: { k: '$$priority.priority', v: '$$priority.count' }
+              }
+            }
+          }
+        }
+      },
+      { $sort: { totalTickets: -1 } }
+    ]);
+    
+    const summary = {
+      totalTags: analytics.length,
+      totalTickets: analytics.reduce((sum, tag) => sum + tag.totalTickets, 0),
+      departmentTickets: analytics.reduce((sum, tag) => sum + tag.departmentTickets, 0),
+      myTickets: analytics.reduce((sum, tag) => sum + tag.myTickets, 0),
+      timeframe: daysBack,
+      generatedAt: new Date()
+    };
+    
+    return res.json({
+      success: true,
+      summary,
+      tags: analytics
+    });
+    
+  } catch (error) {
+    console.error('GET /tickets/analytics/manager-tags error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      msg: 'Error fetching manager tag analytics' 
+    });
+  }
+});
+
+// GET /api/tickets/team-workload-summary - Compact team overview
+router.get('/team-workload-summary', authenticate, async (req, res) => {
+  try {
+    const dept = req.user.department;
+    if (!dept) {
+      return res.status(400).json({ success: false, msg: 'Department required' });
+    }
+
+    // Get all users in department (count only)
+    const totalUsers = await User.countDocuments({ department: dept });
+    
+    // Get active ticket assignments
+    const activeTickets = await Ticket.find({
+      status: { $in: ['open', 'in-progress'] }
+    }).populate('assignedTo', 'name department').lean();
+
+    // Filter tickets for this department
+    const deptTickets = activeTickets.filter(ticket => 
+      ticket.assignedTo?.department === dept
+    );
+
+    // Calculate workload distribution
+    const workloadMap = {};
+    deptTickets.forEach(ticket => {
+      if (ticket.assignedTo) {
+        const userId = ticket.assignedTo._id.toString();
+        workloadMap[userId] = (workloadMap[userId] || 0) + 1;
+      }
+    });
+
+    const workloads = Object.values(workloadMap);
+    
+    // Summary statistics
+    const summary = {
+      totalEmployees: totalUsers,
+      activeEmployees: Object.keys(workloadMap).length,
+      availableEmployees: totalUsers - Object.keys(workloadMap).length,
+      totalActiveTickets: deptTickets.length,
+      avgWorkload: workloads.length > 0 ? (workloads.reduce((a, b) => a + b, 0) / workloads.length).toFixed(1) : 0,
+      workloadDistribution: {
+        light: workloads.filter(w => w <= 2).length,    // 0-2 tickets
+        medium: workloads.filter(w => w >= 3 && w <= 5).length, // 3-5 tickets  
+        heavy: workloads.filter(w => w >= 6).length     // 6+ tickets
+      }
+    };
+
+    // Only return top 3 busiest employees for display
+    const topBusy = Object.entries(workloadMap)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 3)
+      .map(([userId, count]) => {
+        const user = activeTickets.find(t => t.assignedTo?._id.toString() === userId)?.assignedTo;
+        return {
+          name: user?.name || 'Unknown',
+          ticketCount: count
+        };
+      });
+
+    return res.json({
+      success: true,
+      summary,
+      topBusy,
+      department: dept
+    });
+
+  } catch (error) {
+    console.error('Team workload summary error:', error);
+    return res.status(500).json({ success: false, msg: 'Error fetching team workload' });
+  }
+});
+
 // GET /api/tickets/recommend-assignees?department=
 router.get('/recommend-assignees', authenticate, async (req, res) => {
   try {
