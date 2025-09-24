@@ -8,6 +8,8 @@ const authenticate = require('./middleware/auth');
 const ai = require('./ai');
 const uploadRoutes=require('./routes/uploadRoutes')
 const employees=require("./routes/employees")
+const uploadRoutes= require('./routes/uploadRoutes')
+const documentRoutes = require('./routes/documents')
 
 const app = express();
 
@@ -42,7 +44,7 @@ ai.setupChatbotRoutes(app);
 // Health check endpoint
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-
+app.use('/api/documents', documentRoutes);
 
 // --- Server Startup ---
 const PORT = process.env.PORT || 5000;

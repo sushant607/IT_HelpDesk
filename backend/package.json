@@ -8,8 +8,10 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@chroma-core/default-embed": "^0.1.8",
     "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^2.4.3",
+    "chromadb": "^3.0.15",
     "cloudinary": "^1.41.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
