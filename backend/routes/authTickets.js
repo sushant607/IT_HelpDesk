@@ -61,7 +61,10 @@ router.get('/', authenticate, async (req, res) => {
     const filter = {};
 
     if (scope === 'me') {
-      filter.assignedTo = new mongoose.Types.ObjectId(req.user.id);
+      if (req.user.role === 'employee') {
+        filter.assignedTo = new mongoose.Types.ObjectId(req.user.id);
+      } else 
+        filter.createdBy = new mongoose.Types.ObjectId(req.user.id);
     } else if (scope === 'team') {
       if (req.user.role === 'employee') {
         return res.status(403).json({ msg: 'Forbidden: Employees cannot access team tickets' });
@@ -69,6 +72,7 @@ router.get('/', authenticate, async (req, res) => {
       if (!req.user.department) {
         return res.status(400).json({ msg: 'Missing user department' });
       }
+      filter.createdBy = new mongoose.Types.ObjectId(req.user.id);
       filter.department = req.user.department;
     } else {
       return res.status(400).json({ msg: 'Invalid scope. Use "me" or "team"' });
