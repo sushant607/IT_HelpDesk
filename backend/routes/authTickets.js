@@ -332,4 +332,188 @@ router.patch('/:id/assign', authenticate, requireRole('manager', 'admin'), async
     }
   });
 
+  // ADD THESE ROUTES TO YOUR authTickets.js file:
+
+// POST /api/tickets/:id/comments - Add a comment to a ticket
+router.post('/:id/comments', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { message } = req.body;
+    
+    if (!message || !message.trim()) {
+      return res.status(400).json({ msg: 'Comment message is required' });
+    }
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ msg: 'Invalid ticket ID' });
+    }
+    
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+      return res.status(404).json({ msg: 'Ticket not found' });
+    }
+    
+    // Permission check - similar to view permissions
+    const isCreator = ticket.createdBy && ticket.createdBy.toString() === req.user.id;
+    const isAssignee = ticket.assignedTo && ticket.assignedTo.toString() === req.user.id;
+    const sameDept = ticket.department === req.user.department;
+    
+    // Allow comments if user can view the ticket and it's not closed
+    let canComment = false;
+    if (req.user.role === 'employee') {
+      canComment = (isCreator || isAssignee) && ticket.status !== 'closed';
+    } else if (req.user.role === 'manager' || req.user.role === 'admin') {
+      canComment = (sameDept || isCreator || isAssignee) && ticket.status !== 'closed';
+    }
+    
+    if (!canComment) {
+      return res.status(403).json({ msg: 'Cannot add comment to this ticket' });
+    }
+    
+    // Add the comment
+    ticket.comments.push({
+      author: req.user.id,
+      message: message.trim(),
+      createdAt: new Date()
+    });
+    
+    ticket.updatedAt = new Date();
+    await ticket.save();
+    
+    // Return the ticket with populated comments
+    const updatedTicket = await Ticket.findById(id)
+      .populate('createdBy', 'name email role department')
+      .populate('assignedTo', 'name email role department')
+      .populate('comments.author', 'name');
+    
+    return res.json({ 
+      message: 'Comment added successfully',
+      ticket: updatedTicket 
+    });
+    
+  } catch (error) {
+    console.error('POST /tickets/:id/comments error:', error);
+    return res.status(500).json({ msg: 'Server error while adding comment' });
+  }
+});
+
+// POST /api/tickets/:id/attachments - Add attachments to a ticket
+router.post('/:id/attachments', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { attachments } = req.body; // Array of {filename, url} objects
+    
+    if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
+      return res.status(400).json({ msg: 'Attachments array is required' });
+    }
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ msg: 'Invalid ticket ID' });
+    }
+    
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+      return res.status(404).json({ msg: 'Ticket not found' });
+    }
+    
+    // Permission check - only users who can edit the ticket can add attachments
+    const allowed = await canUpdate(req, ticket);
+    if (!allowed) {
+      return res.status(403).json({ msg: 'Cannot add attachments to this ticket' });
+    }
+    
+    // Validate attachment objects
+    for (const attachment of attachments) {
+      if (!attachment.filename || !attachment.url) {
+        return res.status(400).json({ msg: 'Each attachment must have filename and url' });
+      }
+    }
+    
+    // Add attachments
+    ticket.attachments.push(...attachments);
+    ticket.updatedAt = new Date();
+    await ticket.save();
+    
+    // Return the updated ticket
+    const updatedTicket = await Ticket.findById(id)
+      .populate('createdBy', 'name email role department')
+      .populate('assignedTo', 'name email role department')
+      .populate('comments.author', 'name');
+    
+    return res.json({ 
+      message: 'Attachments added successfully',
+      ticket: updatedTicket 
+    });
+    
+  } catch (error) {
+    console.error('POST /tickets/:id/attachments error:', error);
+    return res.status(500).json({ msg: 'Server error while adding attachments' });
+  }
+});
+
+// DELETE /api/tickets/:id/comments/:commentId - Delete a comment
+router.delete('/:id/comments/:commentId', authenticate, async (req, res) => {
+  try {
+    const { id, commentId } = req.params;
+    
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+      return res.status(404).json({ msg: 'Ticket not found' });
+    }
+    
+    const comment = ticket.comments.id(commentId);
+    if (!comment) {
+      return res.status(404).json({ msg: 'Comment not found' });
+    }
+    
+    // Only comment author or admin can delete
+    if (comment.author.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ msg: 'Cannot delete this comment' });
+    }
+    
+    ticket.comments.pull(commentId);
+    ticket.updatedAt = new Date();
+    await ticket.save();
+    
+    return res.json({ message: 'Comment deleted successfully' });
+    
+  } catch (error) {
+    console.error('DELETE /tickets/:id/comments/:commentId error:', error);
+    return res.status(500).json({ msg: 'Server error while deleting comment' });
+  }
+});
+
+// DELETE /api/tickets/:id/attachments/:attachmentId - Delete an attachment
+router.delete('/:id/attachments/:attachmentId', authenticate, async (req, res) => {
+  try {
+    const { id, attachmentId } = req.params;
+    
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+      return res.status(404).json({ msg: 'Ticket not found' });
+    }
+    
+    const attachment = ticket.attachments.id(attachmentId);
+    if (!attachment) {
+      return res.status(404).json({ msg: 'Attachment not found' });
+    }
+    
+    // Permission check - only users who can edit can delete attachments
+    const allowed = await canUpdate(req, ticket);
+    if (!allowed) {
+      return res.status(403).json({ msg: 'Cannot delete attachments from this ticket' });
+    }
+    
+    ticket.attachments.pull(attachmentId);
+    ticket.updatedAt = new Date();
+    await ticket.save();
+    
+    return res.json({ message: 'Attachment deleted successfully' });
+    
+  } catch (error) {
+    console.error('DELETE /tickets/:id/attachments/:attachmentId error:', error);
+    return res.status(500).json({ msg: 'Server error while deleting attachment' });
+  }
+});
+
 module.exports = router;

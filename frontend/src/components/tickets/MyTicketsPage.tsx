@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, Edit, Eye } from "lucide-react";
+import { Plus, Search, Filter, Edit, Eye, Bell } from "lucide-react"; // Added Bell icon
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner"; // Make sure to install: npm install sonner
 
 interface TicketData {
   id: string;
@@ -17,6 +18,19 @@ interface TicketData {
   createdAt: string;
   updatedAt: string;
   createdByName?: string;
+  assignedTo?: {
+    _id: string;
+    name: string;
+    email?: string;
+  };
+}
+
+interface UserData {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  department: string;
 }
 
 export default function MyTicketsPage() {
@@ -25,17 +39,45 @@ export default function MyTicketsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
+  const [remindingTickets, setRemindingTickets] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
+
+  // Get current user data from JWT token
+  useEffect(() => {
+    const getCurrentUser = () => {
+      try {
+        const token = localStorage.getItem("auth_token") || localStorage.getItem("token");
+        if (!token) return;
+
+        // Decode JWT to get user info (since your auth middleware does this server-side)
+        const tokenParts = token.split('.');
+        if (tokenParts.length !== 3) return;
+
+        const payload = JSON.parse(atob(tokenParts[1]));
+        if (payload.user) {
+          setCurrentUser({
+            id: payload.user.id,
+            name: payload.user.name || 'Unknown User',
+            email: payload.user.email || '',
+            role: payload.user.role || 'employee',
+            department: payload.user.department || ''
+          });
+          console.log("Current user from token:", payload.user);
+        }
+      } catch (error) {
+        console.error("Failed to decode user from token:", error);
+      }
+    };
+
+    getCurrentUser();
+  }, []);
 
   useEffect(() => {
     const fetchAssigned = async () => {
       try {
-        const token = localStorage.getItem("auth_token");
-        // Option A: use dedicated assigned route
-        // const url = "http://localhost:5000/api/tickets/assigned";
-        // Option B: use a query on the list route (server should interpret scope=me)
+        const token = localStorage.getItem("auth_token") || localStorage.getItem("token");
         const url = "http://localhost:5000/api/tickets?scope=me";
-
         const res = await fetch(url, {
           headers: {
             "Content-Type": "application/json",
@@ -57,7 +99,6 @@ export default function MyTicketsPage() {
           throw new Error(msg);
         }
 
-        // Accept either array or { tickets: [...] }
         let list: any[] | null = null;
         if (Array.isArray(data)) {
           list = data;
@@ -82,8 +123,14 @@ export default function MyTicketsPage() {
           createdAt: t.createdAt,
           updatedAt: t.updatedAt,
           createdByName: t?.createdBy?.name || undefined,
+          assignedTo: t.assignedTo ? {
+            _id: t.assignedTo._id,
+            name: t.assignedTo.name,
+            email: t.assignedTo.email
+          } : undefined,
         }));
 
+        console.log("Mapped tickets with assignedTo:", mapped);
         setTickets(mapped);
         setFilteredTickets(mapped);
       } catch (e) {
@@ -92,12 +139,12 @@ export default function MyTicketsPage() {
         setFilteredTickets([]);
       }
     };
+
     fetchAssigned();
   }, []);
 
   useEffect(() => {
     let filtered = tickets;
-
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -119,6 +166,49 @@ export default function MyTicketsPage() {
 
     setFilteredTickets(filtered);
   }, [tickets, searchQuery, statusFilter, categoryFilter]);
+
+  // Check if current user is a manager
+  const isManager = currentUser?.role === 'manager';
+
+  // Handle remind functionality (managers only)
+  const handleRemindAssignee = async (ticketId: string, ticketTitle: string) => {
+    if (!isManager) {
+      toast.error('Only managers can send reminders');
+      return;
+    }
+
+    try {
+      setRemindingTickets(prev => new Set(prev.add(ticketId)));
+      
+      const token = localStorage.getItem("auth_token") || localStorage.getItem("token");
+      const res = await fetch(`http://localhost:5000/api/notifications/remind/${ticketId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.msg || 'Failed to send reminder');
+      }
+
+      // Show success toast
+      toast.success(`Reminder sent to ${data.assigneeName} for "${data.ticketTitle}"`);
+      
+    } catch (error) {
+      console.error('Failed to send reminder:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to send reminder');
+    } finally {
+      setRemindingTickets(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(ticketId);
+        return newSet;
+      });
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -155,10 +245,13 @@ export default function MyTicketsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">My Tickets</h1>
-          <p className="text-muted-foreground mt-2">Track and manage your support requests</p>
+          <h1 className="text-3xl font-bold">My Tickets</h1>
+          <p className="text-muted-foreground">
+            Track and manage your support requests
+            {isManager && <span className="ml-2 text-amber-600 font-medium">(Manager View)</span>}
+          </p>
         </div>
         <Button onClick={() => navigate("/tickets/new")} className="bg-gradient-primary hover:shadow-glow transition-all duration-300">
           <Plus className="w-4 h-4 mr-2" />
@@ -167,7 +260,7 @@ export default function MyTicketsPage() {
       </div>
 
       {/* Filters */}
-      <Card className="bg-gradient-card border-0 shadow-md">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Filter className="w-4 h-4" />
@@ -175,22 +268,19 @@ export default function MyTicketsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search tickets..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+          <div className="flex gap-4 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                placeholder="Search tickets..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
             </div>
-
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-40">
-                <SelectValue placeholder="Status" />
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="All Status" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
@@ -200,10 +290,9 @@ export default function MyTicketsPage() {
                 <SelectItem value="closed">Closed</SelectItem>
               </SelectContent>
             </Select>
-
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full sm:w-40">
-                <SelectValue placeholder="Category" />
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
@@ -218,66 +307,83 @@ export default function MyTicketsPage() {
         </CardContent>
       </Card>
 
+      {/* Debug Info - Remove in production */}
+      {process.env.NODE_ENV === 'development' && (
+        <Card className="bg-gray-50">
+          <CardContent className="p-4">
+            <p className="text-sm">
+              <strong>Debug:</strong> Current user role: {currentUser?.role || 'Loading...'} | 
+              Is Manager: {isManager ? 'Yes' : 'No'} | 
+              User: {currentUser?.name || 'Unknown'}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Tickets List */}
       <div className="space-y-4">
         {filteredTickets.length === 0 ? (
-          <Card className="bg-gradient-card border-0 shadow-md">
-            <CardContent className="p-12 text-center">
-              <div className="text-muted-foreground">
-                <p className="text-lg mb-2">No tickets found</p>
-                <p>Try adjusting your filters or create a new ticket</p>
-              </div>
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <h3 className="text-lg font-semibold mb-2">No tickets found</h3>
+              <p className="text-muted-foreground">Try adjusting your filters or create a new ticket</p>
             </CardContent>
           </Card>
         ) : (
           filteredTickets.map((ticket) => (
-            <Card key={ticket.id} className={`bg-gradient-card border-0 shadow-md border-l-4 ${getPriorityColor(ticket.priority)} hover:shadow-lg transition-all duration-200`}>
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="font-semibold text-lg">{ticket.title}</h3>
-                      <Badge variant="outline" className="text-xs">
-                        {ticket.createdByName ? `Created by: ${ticket.createdByName}` : ticket.id.substring(0, 8)}
-                      </Badge>
-                      <Badge className={`${getStatusColor(ticket.status)} text-xs`}>
-                        {ticket.status.replace("-", " ").toUpperCase()}
-                      </Badge>
-                    </div>
-
-                    <p className="text-muted-foreground mb-4 line-clamp-2">{ticket.description}</p>
-
-                    <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <strong>Category:</strong> {ticket.category}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <strong>Priority:</strong>
-                        <Badge variant="outline" className={`text-xs ml-1 ${getPriorityColor(ticket.priority)}`}>
-                          {ticket.priority}
-                        </Badge>
-                      </span>
-                      <span>
-                        <strong>Created:</strong> {new Date(ticket.createdAt).toLocaleDateString()}
-                      </span>
-                      <span>
-                        <strong>Updated:</strong> {new Date(ticket.updatedAt).toLocaleDateString()}
-                      </span>
-                    </div>
+            <Card key={ticket.id} className={`border-l-4 ${getPriorityColor(ticket.priority)}`}>
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <CardTitle className="text-lg">{ticket.title}</CardTitle>
+                    <CardDescription>
+                      {ticket.createdByName ? `Created by: ${ticket.createdByName}` : ticket.id.substring(0, 8)}
+                    </CardDescription>
                   </div>
-
-                  <div className="flex gap-2 ml-4">
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/tickets/${ticket.id}`)}>
-                      <Eye className="w-4 h-4 mr-1" />
-                      View
+                  <Badge className={getStatusColor(ticket.status)}>
+                    {ticket.status.replace("-", " ").toUpperCase()}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">{ticket.description}</p>
+                <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                  <span>Category: {ticket.category}</span>
+                  <span className="flex items-center gap-1">
+                    Priority:
+                    <Badge variant="outline">{ticket.priority}</Badge>
+                  </span>
+                  <span>Created: {new Date(ticket.createdAt).toLocaleDateString()}</span>
+                  <span>Updated: {new Date(ticket.updatedAt).toLocaleDateString()}</span>
+                  {ticket.assignedTo && (
+                    <span>Assigned to: {ticket.assignedTo.name}</span>
+                  )}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  {/* Debug info for button visibility */}
+                  {/* {process.env.NODE_ENV === 'development' && (
+                    <span className="text-xs text-gray-500 mr-4">
+                      Show Remind: {isManager && ticket.assignedTo && !['closed', 'resolved'].includes(ticket.status) ? 'Yes' : 'No'}
+                    </span>
+                  )} */}
+                  
+                  {/* Manager Remind Button - only show for managers with assigned tickets that aren't closed/resolved */}
+                  {isManager && ticket.assignedTo && !['closed', 'resolved'].includes(ticket.status) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRemindAssignee(ticket.id, ticket.title)}
+                      disabled={remindingTickets.has(ticket.id)}
+                      className="hover:bg-amber-50 hover:border-amber-200 text-amber-700 border-amber-200"
+                    >
+                      <Bell className="w-4 h-4 mr-2" />
+                      {remindingTickets.has(ticket.id) ? 'Sending...' : 'Remind'}
                     </Button>
-                    {ticket.status === "open" && (
-                      <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/tickets/${ticket.id}?edit=true`)}>
-                        <Edit className="w-4 h-4 mr-1" />
-                        Edit
-                      </Button>
-                    )}
-                  </div>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/tickets/${ticket.id}`)}>
+                    <Eye className="w-4 h-4 mr-2" />
+                    View
+                  </Button>
                 </div>
               </CardContent>
             </Card>

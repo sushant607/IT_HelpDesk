@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ArrowLeft, Edit, Save, X, Calendar, User, Tag, Flag, Clock } from "lucide-react";
+import { ArrowLeft, Edit, Save, X, Calendar, User, Building2, Flag, Clock, Plus, Send, Paperclip, Trash2, MessageSquare, Upload, FileText, Info, Image, FileArchive, FileSpreadsheet } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
 
@@ -20,113 +20,242 @@ interface Comment {
 }
 
 interface Attachment {
-  url: string,
-  filename: string
+  _id: string;
+  filename: string;
+  url: string;
 }
 
 interface TicketData {
-  id: string;
+  _id: string;
   title: string;
   description: string;
-  category: string;
-  status: "open" | "in-progress" | "resolved" | "closed";
+  status: "open" | "in_progress" | "resolved" | "closed";
   priority: "low" | "medium" | "high" | "urgent";
+  department: string;
+  createdBy: {
+    _id: string;
+    name: string;
+    email: string;
+    role?: string;
+    department?: string;
+  };
+  assignedTo?: {
+    _id: string;
+    name: string;
+    email: string;
+    role?: string;
+    department?: string;
+  };
+  comments: Comment[];
+  attachments: Attachment[];
   createdAt: string;
   updatedAt: string;
-  tags?: string[];
-  assignedToName?: string;
-  createdByName?: string;
-  comments: Comment[],
-  attachments: Attachment[]
 }
 
+interface FormData {
+  title: string;
+  description: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+}
+
+// ENHANCED: File type configuration
+const SUPPORTED_FILE_TYPES = {
+  images: {
+    icon: <Image className="w-4 h-4" />,
+    label: "Images",
+    extensions: ["JPG", "JPEG", "PNG", "GIF", "WEBP", "BMP", "SVG"],
+    accept: ".jpg,.jpeg,.png,.gif,.webp,.bmp,.svg"
+  },
+  documents: {
+    icon: <FileText className="w-4 h-4" />,
+    label: "Documents", 
+    extensions: ["PDF", "DOC", "DOCX", "TXT", "RTF", "MD"],
+    accept: ".pdf,.doc,.docx,.txt,.rtf,.md"
+  },
+  spreadsheets: {
+    icon: <FileSpreadsheet className="w-4 h-4" />,
+    label: "Spreadsheets",
+    extensions: ["XLS", "XLSX", "CSV"],
+    accept: ".xls,.xlsx,.csv"
+  },
+  archives: {
+    icon: <FileArchive className="w-4 h-4" />,
+    label: "Archives",
+    extensions: ["ZIP", "RAR", "7Z", "TAR", "GZ"],
+    accept: ".zip,.rar,.7z,.tar,.gz"
+  },
+  code: {
+    icon: <FileText className="w-4 h-4" />,
+    label: "Code Files",
+    extensions: ["JS", "JSX", "TS", "TSX", "HTML", "CSS", "JSON", "XML"],
+    accept: ".js,.jsx,.ts,.tsx,.html,.css,.json,.xml"
+  }
+};
+
+// Helper function for error handling
+const getErrorMessage = (error: unknown): string => {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return (error as { message: string }).message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "An unexpected error occurred. Please try again.";
+};
+
+// Get file icon based on extension
+const getFileIcon = (filename: string) => {
+  const ext = filename.split('.').pop()?.toUpperCase() || '';
+  
+  if (['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP', 'SVG'].includes(ext)) {
+    return <Image className="w-4 h-4 text-blue-500" />;
+  }
+  if (['PDF', 'DOC', 'DOCX', 'TXT', 'RTF', 'MD'].includes(ext)) {
+    return <FileText className="w-4 h-4 text-red-500" />;
+  }
+  if (['XLS', 'XLSX', 'CSV'].includes(ext)) {
+    return <FileSpreadsheet className="w-4 h-4 text-green-500" />;
+  }
+  if (['ZIP', 'RAR', '7Z', 'TAR', 'GZ'].includes(ext)) {
+    return <FileArchive className="w-4 h-4 text-purple-500" />;
+  }
+  return <FileText className="w-4 h-4 text-gray-500" />;
+};
+
+// Validate file type
+const isValidFileType = (file: File): boolean => {
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  const allExtensions = Object.values(SUPPORTED_FILE_TYPES)
+    .flatMap(type => type.extensions.map(e => e.toLowerCase()));
+  return allExtensions.includes(ext);
+};
+
+// Get combined accept string for all file types
+const getAllAcceptTypes = (): string => {
+  return Object.values(SUPPORTED_FILE_TYPES)
+    .map(type => type.accept)
+    .join(',');
+};
+
+// API calls using direct fetch
+const makeApiCall = async (endpoint: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem('auth_token');
+  
+  const response = await fetch(`http://localhost:5000/api${endpoint}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+    ...options,
+  });
+
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    data = await response.text();
+  }
+
+  if (!response.ok) {
+    throw new Error(data.msg || data.message || `Request failed with status ${response.status}`);
+  }
+
+  return data;
+};
+
 export default function TicketDetailsPage() {
-  const { id } = useParams();
+  // Extract ticketId with proper typing and fallback
+  const params = useParams();
+  const ticketId = params.ticketId || params.id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
+  
   const [ticket, setTicket] = useState<TicketData | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState<Partial<TicketData>>({});
+  const [formData, setFormData] = useState<FormData>({
+    title: "",
+    description: "",
+    status: "open",
+    priority: "low",
+  });
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
+  const [error, setError] = useState("");
+
+  // Comment and attachment states
+  const [newComment, setNewComment] = useState("");
+  const [isAddingComment, setIsAddingComment] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [showFileTypeInfo, setShowFileTypeInfo] = useState(false); // NEW: Toggle for file type info
+
+  // Get user info from localStorage
   const userRole = localStorage.getItem("user_role");
-  const userEmail = localStorage.getItem("user_email");
+  const userId = localStorage.getItem("user_id");
+  const userDepartment = localStorage.getItem("user_department");
 
-  const categories = [
-    "Account Access", "Software", "Hardware", "Network", "Email",
-    "Infrastructure", "Database", "Security", "Other"
-  ];
+  // Check if edit mode is requested from URL
+  useEffect(() => {
+    if (searchParams.get('edit') === 'true' && ticket) {
+      setIsEditing(true);
+    }
+  }, [searchParams, ticket]);
 
-  const teamMembers = [
-    "John Doe", "Jane Smith", "Bob Wilson", "Sarah Johnson",
-    "Mike Chen", "Lisa Park", "Alex Rodriguez", "Emma Thompson"
-  ];
-
+  // Fetch ticket data
   useEffect(() => {
     const fetchTicket = async () => {
+      if (!ticketId) {
+        setError("No ticket ID provided");
+        setIsFetching(false);
+        return;
+      }
+      
+      // Validate ticketId format (should be MongoDB ObjectId)
+      if (ticketId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(ticketId)) {
+        setError("Invalid ticket ID format");
+        setIsFetching(false);
+        return;
+      }
+      
+      setIsFetching(true);
+      setError("");
+      
       try {
-        const token = localStorage.getItem("auth_token");
-        const res = await fetch(`http://localhost:5000/api/tickets/${id}`, {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: token ? `Bearer ${token}` : "",
-          },
+        const response = await makeApiCall(`/tickets/${ticketId}`);
+        const ticketData = response.ticket || response;
+        
+        if (!ticketData || !ticketData._id) {
+          throw new Error('Invalid ticket data received');
+        }
+        
+        setTicket(ticketData);
+        
+        // Initialize form data
+        setFormData({
+          title: ticketData.title || "",
+          description: ticketData.description || "",
+          status: ticketData.status || "open",
+          priority: ticketData.priority || "low",
         });
-
-        const txt = await res.text();
-        let data;
-        try { data = JSON.parse(txt); } catch { data = txt; }
-
-        if (!res.ok) {
-          const msg = typeof data === "string"
-            ? data
-            : data?.msg || `Request failed with ${res.status}`;
-          throw new Error(msg);
-        }
-
-        // Accept either a single ticket object or { ticket: {...} }
-        let t = null;
-        if (data && typeof data === "object" && !Array.isArray(data)) {
-          if (data.ticket) {
-            t = data.ticket;
-          } else {
-            t = data;
-          }
-        }
-        console.log(t.tags);
-
-        if (!t) {
-          console.error("Unexpected payload for /tickets/:id:", data);
-          setTicket(null);
-          return;
-        }
-
-        // Map API object to UI shape
-        setTicket({
-          id: t._id,
-          title: t.title,
-          description: t.description ?? "",
-          category: t.department ?? "General",
-          status: t.status === "in_progress" ? "in-progress" : t.status,
-          priority: t.priority,
-          createdAt: t.createdAt,
-          updatedAt: t.updatedAt,
-          tags: t.tags ?? [],
-          createdByName: t?.createdBy?.name,
-          assignedToName: t?.assignedTo?.name,
-          comments: t?.comments,
-          attachments: t?.attachments
-        });
-      } catch (e) {
-        console.error("Failed to load ticket:", e);
-        setTicket(null);
+      } catch (err: unknown) {
+        console.error("Error fetching ticket:", err);
+        setError(getErrorMessage(err));
+      } finally {
+        setIsFetching(false);
       }
     };
-    if (id) fetchTicket();
-  }, [id]);
+
+    fetchTicket();
+  }, [ticketId]);
+
+  // Keep all your existing handler functions (getStatusColor, getPriorityColor, etc.)
   const getStatusColor = (status: string) => {
     switch (status) {
       case "open": return "bg-blue-500 hover:bg-blue-600 text-white";
-      case "in-progress": return "bg-amber-500 hover:bg-amber-600 text-white";
+      case "in_progress": return "bg-amber-500 hover:bg-amber-600 text-white";
       case "resolved": return "bg-green-500 hover:bg-green-600 text-white";
       case "closed": return "bg-gray-500 hover:bg-gray-600 text-white";
       default: return "bg-muted";
@@ -151,52 +280,367 @@ export default function TicketDetailsPage() {
     }
   };
 
-  const canEdit = () => {
-    if (userRole === "manager") return true;
-    if (ticket?.status === "open" && ticket?.createdByName === userEmail) return true;
+  // Permission checks
+  const canEdit = (): boolean => {
+    if (!ticket) return false;
+    
+    const isCreator = ticket.createdBy && ticket.createdBy._id?.toString() === userId;
+    const isAssignee = ticket.assignedTo && ticket.assignedTo._id?.toString() === userId;
+    const sameDept = ticket.department === userDepartment;
+
+    if (userRole === "employee") {
+      return isCreator || isAssignee;
+    }
+
+    if (userRole === "manager" || userRole === "admin") {
+      return sameDept || isCreator || isAssignee;
+    }
+
     return false;
+  };
+
+  const canAddComments = (): boolean => {
+    if (!ticket) return false;
+    
+    const isCreator = ticket.createdBy && ticket.createdBy._id?.toString() === userId;
+    const isAssignee = ticket.assignedTo && ticket.assignedTo._id?.toString() === userId;
+    const sameDept = ticket.department === userDepartment;
+
+    if (ticket.status === "closed") return false;
+
+    if (userRole === "employee") {
+      return isCreator || isAssignee;
+    }
+
+    if (userRole === "manager" || userRole === "admin") {
+      return sameDept || isCreator || isAssignee;
+    }
+
+    return false;
+  };
+
+  // Keep all your existing handler functions
+  const handleInputChange = (field: keyof FormData, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (error) setError("");
   };
 
   const handleEdit = () => {
     setIsEditing(true);
+    setError("");
   };
 
   const handleCancel = () => {
+    if (!ticket) return;
+    
     setIsEditing(false);
-    setFormData(ticket || {});
+    setError("");
+    
+    setFormData({
+      title: ticket.title || "",
+      description: ticket.description || "",
+      status: ticket.status || "open",
+      priority: ticket.priority || "low",
+    });
+
+    navigate(`/dashboard/tickets/${ticketId}`, { replace: true });
+  };
+
+  const validateForm = (): boolean => {
+    if (!formData.title.trim()) {
+      setError("Title is required");
+      return false;
+    }
+    if (!formData.description.trim()) {
+      setError("Description is required");
+      return false;
+    }
+    return true;
   };
 
   const handleSave = async () => {
-    if (!ticket) return;
+    if (!ticket || !ticketId) return;
+    
+    if (!validateForm()) return;
 
     setIsLoading(true);
-    try {
-      // Mock save - In real app, update in Supabase
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    setError("");
 
-      const updatedTicket = {
-        ...ticket,
-        ...formData,
-        updatedAt: new Date().toISOString().split('T')[0]
+    try {
+      const updates: any = {
+        title: formData.title,
+        description: formData.description,
+        priority: formData.priority,
       };
 
-      setTicket(updatedTicket);
-      setIsEditing(false);
+      if (userRole === "manager" || userRole === "admin") {
+        updates.status = formData.status;
+      }
 
-      toast({
-        title: "Ticket updated successfully",
-        description: `Ticket ${ticket.id} has been updated.`,
+      await makeApiCall(`/tickets/${ticketId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
       });
-    } catch (error) {
+      
+      const response = await makeApiCall(`/tickets/${ticketId}`);
+      const updatedTicket = response.ticket || response;
+      setTicket(updatedTicket);
+      
+      setIsEditing(false);
+      navigate(`/dashboard/tickets/${ticketId}`, { replace: true });
+      
       toast({
-        title: "Error",
-        description: "Failed to update ticket. Please try again.",
-        variant: "destructive",
+        title: "Success",
+        description: `Ticket has been updated successfully.`,
       });
+    } catch (err: unknown) {
+      console.error("Error updating ticket:", err);
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
   };
+
+  const handleAddComment = async () => {
+    if (!newComment.trim() || !ticketId) return;
+    
+    setIsAddingComment(true);
+    try {
+      const response = await makeApiCall(`/tickets/${ticketId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ message: newComment.trim() }),
+      });
+      
+      setTicket(response.ticket);
+      setNewComment("");
+
+      toast({
+        title: "Comment added",
+        description: "Your comment has been added successfully.",
+      });
+    } catch (err: unknown) {
+      console.error("Error adding comment:", err);
+      toast({
+        title: "Error",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingComment(false);
+    }
+  };
+
+  // ENHANCED: File upload with validation
+  const handleFileUpload = async () => {
+    if (!selectedFiles || selectedFiles.length === 0 || !ticketId) return;
+
+    // Validate file types before upload
+    const invalidFiles = Array.from(selectedFiles).filter(file => !isValidFileType(file));
+    if (invalidFiles.length > 0) {
+      toast({
+        title: "Invalid file type",
+        description: `Files not supported: ${invalidFiles.map(f => f.name).join(', ')}`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setIsUploadingFiles(true);
+    try {
+      const uploadedAttachments = [];
+      
+      for (const file of Array.from(selectedFiles)) {
+        console.log('Uploading file:', file.name);
+        
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const token = localStorage.getItem('auth_token');
+        
+        const uploadResponse = await fetch('http://localhost:5000/api/upload', {
+          method: 'POST',
+          headers: {
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
+          body: formData,
+        });
+
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text();
+          throw new Error(`Upload failed for ${file.name}: ${errorText}`);
+        }
+
+        const uploadData = await uploadResponse.json();
+        
+        uploadedAttachments.push({
+          filename: uploadData.filename || file.name,
+          url: uploadData.url
+        });
+      }
+
+      const response = await makeApiCall(`/tickets/${ticketId}/attachments`, {
+        method: 'POST',
+        body: JSON.stringify({ attachments: uploadedAttachments }),
+      });
+
+      setTicket(response.ticket);
+      setSelectedFiles(null);
+      
+      const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+      
+      toast({
+        title: "Files uploaded",
+        description: `${uploadedAttachments.length} file(s) uploaded successfully.`,
+      });
+    } catch (err: unknown) {
+      console.error("Error uploading files:", err);
+      toast({
+        title: "Upload failed",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingFiles(false);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    try {
+      await makeApiCall(`/tickets/${ticketId}/comments/${commentId}`, {
+        method: 'DELETE',
+      });
+      
+      const response = await makeApiCall(`/tickets/${ticketId}`);
+      const updatedTicket = response.ticket || response;
+      setTicket(updatedTicket);
+      
+      toast({
+        title: "Comment deleted",
+        description: "Comment has been deleted successfully.",
+      });
+    } catch (err: unknown) {
+      console.error("Error deleting comment:", err);
+      toast({
+        title: "Error",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    try {
+      await makeApiCall(`/tickets/${ticketId}/attachments/${attachmentId}`, {
+        method: 'DELETE',
+      });
+      
+      const response = await makeApiCall(`/tickets/${ticketId}`);
+      const updatedTicket = response.ticket || response;
+      setTicket(updatedTicket);
+      
+      toast({
+        title: "Attachment deleted",
+        description: "Attachment has been deleted successfully.",
+      });
+    } catch (err: unknown) {
+      console.error("Error deleting attachment:", err);
+      toast({
+        title: "Error",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      setSelectedFiles(files);
+    }
+  };
+
+  // ENHANCED: File selection handler with validation
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const invalidFiles = Array.from(files).filter(file => !isValidFileType(file));
+    
+    if (invalidFiles.length > 0) {
+      toast({
+        title: "Some files not supported",
+        description: `Unsupported files: ${invalidFiles.map(f => f.name).join(', ')}`,
+        variant: "destructive",
+      });
+      
+      // Filter out invalid files
+      const validFiles = Array.from(files).filter(file => isValidFileType(file));
+      
+      if (validFiles.length > 0) {
+        const dt = new DataTransfer();
+        validFiles.forEach(file => dt.items.add(file));
+        setSelectedFiles(dt.files);
+      } else {
+        setSelectedFiles(null);
+        e.target.value = '';
+      }
+    } else {
+      setSelectedFiles(files);
+    }
+  };
+
+  if (isFetching) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Loading...</h1>
+            <p className="text-muted-foreground mt-2">
+              Fetching ticket details...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !ticket) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Error</h1>
+            <p className="text-muted-foreground mt-2">
+              {error}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!ticket) {
     return (
@@ -230,7 +674,7 @@ export default function TicketDetailsPage() {
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold tracking-tight">{ticket.title}</h1>
               <Badge variant="outline" className="text-sm">
-                {ticket.id}
+                {ticket._id.slice(-8).toUpperCase()}
               </Badge>
             </div>
             <p className="text-muted-foreground mt-2">
@@ -238,7 +682,6 @@ export default function TicketDetailsPage() {
             </p>
           </div>
         </div>
-
         {canEdit() && !isEditing && (
           <Button onClick={handleEdit} className="bg-gradient-primary hover:shadow-glow">
             <Edit className="w-4 h-4 mr-2" />
@@ -248,7 +691,7 @@ export default function TicketDetailsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
+        {/* Main Content - keeping your existing structure */}
         <div className="lg:col-span-2 space-y-6">
           <Card className="bg-gradient-card border-0 shadow-lg">
             <CardHeader>
@@ -256,7 +699,7 @@ export default function TicketDetailsPage() {
                 <CardTitle>Ticket Information</CardTitle>
                 {isEditing && (
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={handleCancel} variant="outline">
+                    <Button size="sm" onClick={handleCancel} variant="outline" disabled={isLoading}>
                       <X className="w-4 h-4 mr-1" />
                       Cancel
                     </Button>
@@ -269,20 +712,27 @@ export default function TicketDetailsPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
               {/* Title */}
               <div className="space-y-2">
                 <Label htmlFor="title">Title</Label>
                 {isEditing ? (
                   <Input
                     id="title"
-                    value={formData.title || ""}
-                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    value={formData.title}
+                    onChange={(e) => handleInputChange('title', e.target.value)}
+                    disabled={isLoading}
                   />
                 ) : (
                   <p className="text-lg font-medium">{ticket.title}</p>
                 )}
               </div>
-
+              
               <Separator />
 
               {/* Description */}
@@ -291,9 +741,10 @@ export default function TicketDetailsPage() {
                 {isEditing ? (
                   <Textarea
                     id="description"
-                    value={formData.description || ""}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    value={formData.description}
+                    onChange={(e) => handleInputChange('description', e.target.value)}
                     rows={6}
+                    disabled={isLoading}
                   />
                 ) : (
                   <div className="bg-muted/30 p-4 rounded-lg">
@@ -304,40 +755,23 @@ export default function TicketDetailsPage() {
                 )}
               </div>
 
-              {/* Category and Priority */}
+              {/* Department and Priority */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
-                  {isEditing ? (
-                    <Select
-                      value={formData.category || ""}
-                      onValueChange={(value) => setFormData({ ...formData, category: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map(category => (
-                          <SelectItem key={category} value={category}>
-                            {category}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Tag className="w-4 h-4 text-muted-foreground" />
-                      <span>{ticket.category}</span>
-                    </div>
-                  )}
+                  <Label htmlFor="department">Department</Label>
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-muted-foreground" />
+                    <span>{ticket.department.charAt(0).toUpperCase() + ticket.department.slice(1)}</span>
+                  </div>
                 </div>
-
+                
                 <div className="space-y-2">
                   <Label htmlFor="priority">Priority</Label>
                   {isEditing ? (
                     <Select
-                      value={formData.priority || ""}
-                      onValueChange={(value) => setFormData({ ...formData, priority: value as any })}
+                      value={formData.priority}
+                      onValueChange={(value) => handleInputChange('priority', value)}
+                      disabled={isLoading}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -378,8 +812,8 @@ export default function TicketDetailsPage() {
                 </div>
               </div>
 
-              {/* Manager-only fields */}
-              {userRole === "manager" && (
+              {/* Manager/Admin-only fields */}
+              {(userRole === "manager" || userRole === "admin") && (
                 <>
                   <Separator />
                   <div className="space-y-4">
@@ -388,58 +822,38 @@ export default function TicketDetailsPage() {
                         <Label htmlFor="status">Status</Label>
                         {isEditing ? (
                           <Select
-                            value={formData.status || ""}
-                            onValueChange={(value) => setFormData({ ...formData, status: value as any })}
+                            value={formData.status}
+                            onValueChange={(value) => handleInputChange('status', value)}
+                            disabled={isLoading}
                           >
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="open">Open</SelectItem>
-                              <SelectItem value="in-progress">In Progress</SelectItem>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
                               <SelectItem value="resolved">Resolved</SelectItem>
                               <SelectItem value="closed">Closed</SelectItem>
                             </SelectContent>
                           </Select>
                         ) : (
                           <Badge className={`${getStatusColor(ticket.status)} px-3 py-1`}>
-                            {ticket.status.replace("-", " ").toUpperCase()}
+                            {ticket.status.replace("_", " ").toUpperCase()}
                           </Badge>
                         )}
                       </div>
-
+                      
                       <div className="space-y-2">
                         <Label htmlFor="assignee">Assigned To</Label>
-                        {isEditing ? (
-                          <Select
-                            value={formData.assignedToName || "unassigned"}
-                            onValueChange={(value) => setFormData({ ...formData, assignedToName: value === "unassigned" ? undefined : value })}
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {teamMembers.map(member => (
-                                <SelectItem key={member} value={member}>
-                                  {member}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <User className="w-4 h-4 text-muted-foreground" />
-                            <span>{ticket.assignedToName || "Unassigned"}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-muted-foreground" />
+                          <span>{ticket.assignedTo?.name || "Unassigned"}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </>
               )}
-
-
             </CardContent>
           </Card>
         </div >
@@ -461,7 +875,6 @@ export default function TicketDetailsPage() {
                     {new Date(ticket.createdAt).toLocaleDateString()}
                   </span>
                 </div>
-
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3" />
@@ -471,18 +884,15 @@ export default function TicketDetailsPage() {
                     {new Date(ticket.updatedAt).toLocaleDateString()}
                   </span>
                 </div>
-
-                {ticket.createdByName && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground flex items-center gap-1">
-                      <User className="w-3 h-3" />
-                      Reporter
-                    </span>
-                    <span className="font-medium text-xs">
-                      {ticket.createdByName}
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground flex items-center gap-1">
+                    <User className="w-3 h-3" />
+                    Reporter
+                  </span>
+                  <span className="font-medium text-xs">
+                    {ticket.createdBy?.name || "Unknown"}
+                  </span>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -490,55 +900,232 @@ export default function TicketDetailsPage() {
           {/* Comments Section */}
           <Card className="bg-gradient-card border-0 shadow-lg">
             <CardHeader>
-              <CardTitle className="text-lg">Comments</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  Comments
+                </CardTitle>
+                <Badge variant="secondary" className="text-xs">
+                  {ticket.comments?.length || 0}
+                </Badge>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Existing comments */}
               {ticket.comments && ticket.comments.length > 0 ? (
-                ticket.comments.map((comment) => (
-                  <div key={comment._id} className="border-b pb-3">
-                    <p className="text-sm">
-                      <span className="font-semibold">
-                        {comment.author?.name || "Unknown User"}:
-                      </span>{" "}
-                      {comment.message}
-                    </p>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(comment.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-                ))
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {ticket.comments.map((comment) => (
+                    <div key={comment._id} className="border border-muted rounded-lg p-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <p className="text-sm font-semibold">
+                            {comment.author?.name || "Unknown User"}
+                          </p>
+                          <p className="text-sm mt-1">{comment.message}</p>
+                          <span className="text-xs text-muted-foreground mt-2 block">
+                            {new Date(comment.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        {(comment.author?._id === userId || userRole === 'admin') && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDeleteComment(comment._id)}
+                            className="text-red-500 hover:text-red-700 ml-2 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No comments yet</p>
+                <p className="text-sm text-muted-foreground text-center py-4">No comments yet</p>
+              )}
+              
+              {/* Add new comment */}
+              {canAddComments() && (
+                <>
+                  <Separator />
+                  <div className="space-y-3">
+                    <Textarea
+                      placeholder="Add a comment..."
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      rows={3}
+                      disabled={isAddingComment}
+                      className="resize-none transition-all duration-200 focus:ring-2 focus:ring-blue-500"
+                    />
+                    <Button 
+                      size="sm" 
+                      onClick={handleAddComment}
+                      disabled={!newComment.trim() || isAddingComment}
+                      className="w-full transition-all duration-200 hover:shadow-md"
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      {isAddingComment ? "Adding..." : "Add Comment"}
+                    </Button>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
 
-          {/* Attachments Section */}
+          {/* ENHANCED: Attachments Section with File Type Information */}
           <Card className="bg-gradient-card border-0 shadow-lg">
             <CardHeader>
-              <CardTitle className="text-lg">Attachments</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Paperclip className="w-4 h-4" />
+                  Attachments
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">
+                    {ticket.attachments?.length || 0}
+                  </Badge>
+                  {canEdit() && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowFileTypeInfo(!showFileTypeInfo)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <Info className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {ticket.attachments && ticket.attachments.length > 0 ? (
-                <ul className="list-disc list-inside text-sm space-y-1">
-                  <ul>
-                    {ticket.attachments.map((file, idx) => (
-                      <li key={idx}>
-                        <a
-                          href={file.url}          // actual path to open
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {file.filename}
-                        </a>
-                      </li>
+            <CardContent className="space-y-4">
+              {/* ENHANCED: File Type Information */}
+              {showFileTypeInfo && canEdit() && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-3">
+                  <div className="flex items-center gap-2 text-blue-700">
+                    <Info className="w-4 h-4" />
+                    <span className="font-medium text-sm">Supported File Types</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {Object.values(SUPPORTED_FILE_TYPES).map((type, index) => (
+                      <div key={index} className="flex items-center gap-2 text-xs">
+                        {type.icon}
+                        <span className="font-medium">{type.label}:</span>
+                        <span className="text-muted-foreground">
+                          {type.extensions.join(', ')}
+                        </span>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
+                  <div className="text-xs text-blue-600 mt-2">
+                    Maximum file size: 10MB per file
+                  </div>
+                </div>
+              )}
 
-                </ul>
+              {/* Existing attachments */}
+              {ticket.attachments && ticket.attachments.length > 0 ? (
+                <div className="space-y-2">
+                  {ticket.attachments.map((attachment) => (
+                    <div key={attachment._id} className="flex items-center justify-between border border-muted rounded-lg p-2 hover:bg-muted/50 transition-colors duration-200">
+                      <a
+                        href={attachment.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline text-sm flex-1 truncate flex items-center gap-2 hover:text-blue-800 transition-colors duration-200"
+                      >
+                        {getFileIcon(attachment.filename)}
+                        {attachment.filename}
+                      </a>
+                      {canEdit() && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleDeleteAttachment(attachment._id)}
+                          className="text-red-500 hover:text-red-700 ml-2 hover:bg-red-50 transition-all duration-200"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No attachments</p>
+                <p className="text-sm text-muted-foreground text-center py-4">No attachments</p>
+              )}
+              
+              {/* ENHANCED: Upload new files with file type restrictions */}
+              {canEdit() && (
+                <>
+                  <Separator />
+                  <div className="space-y-3">
+                    {/* Enhanced file upload area with drag & drop and file type info */}
+                    <div
+                      className={`border-2 border-dashed rounded-lg p-4 transition-all duration-200 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 ${
+                        isDragOver ? 'border-blue-400 bg-blue-50' : 'border-muted'
+                      } ${selectedFiles && selectedFiles.length > 0 ? 'border-green-400 bg-green-50/50' : ''}`}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => document.getElementById('file-upload')?.click()}
+                    >
+                      <div className="text-center space-y-2">
+                        <Upload className={`w-8 h-8 mx-auto transition-colors duration-200 ${
+                          isDragOver ? 'text-blue-500' : 'text-muted-foreground'
+                        }`} />
+                        <div className="text-sm">
+                          <p className="font-medium">
+                            {isDragOver ? 'Drop files here' : 'Click to select files or drag & drop'}
+                          </p>
+                          <p className="text-muted-foreground text-xs mt-1">
+                            Supported: Images, Documents, Spreadsheets, Archives, Code files
+                          </p>
+                          <p className="text-muted-foreground text-xs">
+                            Max 10MB per file • Multiple files supported
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <Input
+                      id="file-upload"
+                      type="file"
+                      multiple
+                      onChange={handleFileSelect}
+                      disabled={isUploadingFiles}
+                      className="hidden"
+                      accept={getAllAcceptTypes()}
+                    />
+                    
+                    {selectedFiles && selectedFiles.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          Selected files ({selectedFiles.length}):
+                        </p>
+                        <div className="max-h-24 overflow-y-auto space-y-1">
+                          {Array.from(selectedFiles).map((file, index) => (
+                            <div key={index} className="text-xs bg-muted/50 rounded px-2 py-1 truncate flex items-center gap-2">
+                              {getFileIcon(file.name)}
+                              <span className="flex-1">{file.name}</span>
+                              <span className="text-muted-foreground">
+                                ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <Button 
+                      size="sm" 
+                      onClick={handleFileUpload}
+                      disabled={!selectedFiles || selectedFiles.length === 0 || isUploadingFiles}
+                      className="w-full transition-all duration-200 hover:shadow-md"
+                    >
+                      <Upload className="w-4 h-4 mr-2" />
+                      {isUploadingFiles ? "Uploading..." : "Upload Files"}
+                    </Button>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -550,7 +1137,7 @@ export default function TicketDetailsPage() {
             <CardContent>
               <div className="text-center space-y-3">
                 <Badge className={`${getStatusColor(ticket.status)} px-4 py-2 text-sm`}>
-                  {ticket.status.replace("-", " ").toUpperCase()}
+                  {ticket.status.replace("_", " ").toUpperCase()}
                 </Badge>
                 <p className="text-xs text-muted-foreground">
                   Last updated: {new Date(ticket.updatedAt).toLocaleDateString()}
