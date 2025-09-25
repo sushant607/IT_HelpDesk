@@ -18,6 +18,58 @@ async function countTicketsAssignedToUser(userId) {
   if (!mongoose.Types.ObjectId.isValid(userId)) return 0;
   return await Ticket.countDocuments({ assignedTo: userId });
 }
+// PATCH /api/tickets/:id/status — update status only with RBAC
+// PUT /api/tickets/:id — update fields (including status) and return updated doc
+router.put('/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = { ...(req.body || {}) };
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ msg: 'invalid_id' });
+    }
+
+    const ticket = await Ticket.findById(id);
+    if (!ticket) return res.status(404).json({ msg: 'not_found' });
+
+    const allowed = await canUpdate(req, ticket);
+    if (!allowed) return res.status(403).json({ msg: 'forbidden' });
+
+    // Employees cannot change department/creator
+    if (req.user.role === 'employee') {
+      delete updates.department;
+      delete updates.createdBy;
+    }
+    // Managers/Admins cannot move across departments
+    if ((req.user.role === 'manager' || req.user.role === 'admin') &&
+        updates.department && updates.department !== ticket.department) {
+      return res.status(403).json({ msg: 'cannot move ticket across departments' });
+    }
+
+    // Optional: validate status enum
+    if (typeof updates.status !== 'undefined') {
+      const allowedStatuses = ['open','in_progress','resolved','closed'];
+      if (!allowedStatuses.includes(updates.status)) {
+        return res.status(400).json({ msg: 'invalid_status' });
+      }
+    }
+
+    ticket.set({ ...updates, updatedAt: new Date() });
+    await ticket.save();
+
+    const updated = await Ticket.findById(id)
+      .populate('createdBy', 'name email role department')
+      .populate('assignedTo', 'name email role department')
+      .populate('comments.author', 'name');
+
+    return res.json({ message: 'ticket_updated', ticket: updated });
+  } catch (e) {
+    console.error('PUT /tickets/:id error:', e);
+    return res.status(500).json({ msg: 'update_error' });
+  }
+});
+
+
 
 // GET /api/tickets/analytics/tags - Get tag-wise ticket analytics
 router.get('/analytics/tags', authenticate, async (req, res) => {
