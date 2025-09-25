@@ -17,9 +17,10 @@ const appendHistory = (userId, role, content) => {
   }
 };
 
-function buildMessages(userId, userText) {
+function buildMessages(userId, userText, userRole) {
   const system = new SystemMessage(`
 You are an IT helpdesk assistant. Follow these rules strictly:
+- The user you are currently interacting with is a ${userRole}. Treat them accordingly.
 
 - Core behavior:
   - Be clear, and professional in all replies. Ask one or two focused questions at a time. Do not create tickets until all required fields are explicitly confirmed. Always prefer clarification over guessing.
@@ -37,15 +38,16 @@ You are an IT helpdesk assistant. Follow these rules strictly:
      - Only after an explicit Yes, call create_ticket with the confirmed values. If No, ask what to change.
   4) Feel free to infer the fields for the ticket based on what you think would be appropriate and suggest them to the user before creating the ticket
   5) Avoid doing everything in one message, use multiple replies like a normal conversation
+  6) In case the user is a manager, make sure you call the fetch assignees tool and give the user a choice of ticket assignees before you create the ticket
 
 - Constraints:
   - Employees: do not request assignedTo. Managers/Admins: require assignedTo and block creation until provided.
   - If the user asks non-ticket questions (e.g., status checks), use the appropriate tool but do not create tickets.
   - If the user says "create a ticket" without giving department and complaint details (and assignedTo for manager/admin), ask for those first and do not call create_ticket yet.
+  - If you do call fetchRecommendedAssignees, call it only after you have enough context for the tickets. Make sure you ask the user whether they want some suggestions for assignees first
 
 - Tool usage policy:
   - Only call create_ticket after explicit user confirmation and after all required fields are collected and validated. Include assignedTo only when the role is manager/admin.
-  - After department is selected and the role is manager/admin, you MUST call fetchAssignees and list its results for selection before confirmation and creation.
 
 - Response style:
   - Some examples to gather information. Do not use directly, instead paraphrase them:
@@ -408,7 +410,7 @@ const createTicketsFromGmailTool = tool(
 );
 
 // Tool: Fetch recommended assignees for a department (manager/admin flow)
-const fetchAssigneesTool = tool(
+const fetchRecommendedAssigneesTool = tool(
   async (input, config) => {
     const req = config?.configurable?.req;
     if (!req) throw new Error('Request context missing');
@@ -435,12 +437,12 @@ const fetchAssigneesTool = tool(
       count: options.length,
       options,
       summary: options.length
-        ? options.map(o => `${o.index}) ${o.name} (id=${o.id}) — ${o.assignedCount} open`).join('\n')
+        ? 'Here are a list of the recommended assignee\'s for this issue, whom would like to assign it to?\n' + options.map(o => `${o.index}) ${o.name} (id=${o.id}) — ${o.assignedCount} open`).join('\n')
         : 'No eligible assignees found for this department'
     };
   },
   {
-    name: 'fetchAssignees',
+    name: 'fetchRecommendedAssignees',
     description: 'Fetch top recommended assignees for a department to pick assignedTo (manager/admin only).only fetch employee under that department and not managers/admins',
     schema: z.object({ department: z.string() })
   }
@@ -621,6 +623,7 @@ const createTicketTool = tool(
         'hardware team',
         'database team',
       ]).optional(),
+      assignedTo: z.string().optional().describe("Only use when user is a manager, should contain the ID of an employee to assign the ticket to")
     }),
   }
 );
@@ -640,7 +643,7 @@ const toolsMap = {
   createTicketsFromGmail: createTicketsFromGmailTool,
   // retrieveDocuments: retrieveDocumentsTool,
   // ingestDocuments: ingestDocumentsTool,
-  fetchAssignees: fetchAssigneesTool,
+  fetchRecommendedAssignees: fetchRecommendedAssigneesTool,
   queryMyTicketsRag: queryMyTicketsRagTool,
   indexMyTicketsRag: indexMyTicketsRagTool
 };
@@ -653,7 +656,7 @@ const llm = new ChatGoogleGenerativeAI({
   tools: [
     // retrieveDocumentsTool,
     // ingestDocumentsTool,
-    fetchAssigneesTool,
+    fetchRecommendedAssigneesTool,
     fetchMyTicketsTool,
     fetchTeamTicketsTool,
     createTicketTool,
@@ -672,12 +675,13 @@ const llm = new ChatGoogleGenerativeAI({
       return res.status(400).json({ error: "Message is required as a non-empty string." });
     }
     const userId = req.user?.id;
+    const userRole = req.user?.role;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
   
     appendHistory(userId, "user", message.trim());
   
     try {
-      const messages = buildMessages(userId, message);
+      const messages = buildMessages(userId, message, userRole);
 
       // just making sure
       const types = messages.map((m) => (typeof m._getType === 'function' ? m._getType() : 'unknown'));
