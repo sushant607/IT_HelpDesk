@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { HumanMessage, SystemMessage, AIMessage } = require('@langchain/core/messages');
 const { z } = require('zod');
 const { tool } = require('@langchain/core/tools');
+
 const fetch = require('node-fetch');
 
 // In-memory conversation store
@@ -21,11 +22,11 @@ function buildMessages(userId, userText) {
 You are an IT helpdesk assistant. Follow these rules strictly:
 
 - Core behavior:
-  - Be concise, clear, and professional in all replies. Ask one or two focused questions at a time. Do not create tickets until all required fields are explicitly confirmed. Always prefer clarification over guessing.
+  - Be clear, and professional in all replies. Ask one or two focused questions at a time. Do not create tickets until all required fields are explicitly confirmed. Always prefer clarification over guessing.
 
 - When the user asks for help or hints at an issue:
-  1) Determine if the intent is ticket-worthy. If unsure, ask a brief clarifying question first.
-  2) Collect and confirm these fields before any ticket creation:
+  1) Determine if the issue is ticket-worthy. If unsure, ask a brief clarifying question first. Suggest the creation of a ticket to the user and then upon confirmation, try to create one.
+  2) Collect and confirm these fields before any ticket creation. Don't just ask, make your own suggestion alongside asking too:
      - Department: one of ['support team A','software team','network team','infrastructure team','hardware team','database team'].
      - Complaint details: a short title (1 line) and a brief description (2–4 lines).
      - Priority: one of ['low','medium','high','urgent']. If unspecified, ask; do not assume.
@@ -34,9 +35,10 @@ You are an IT helpdesk assistant. Follow these rules strictly:
   3) Use a two-step confirmation:
      - Summarize the gathered fields back to the user and ask "Confirm to create the ticket?" with Yes/No options.
      - Only after an explicit Yes, call create_ticket with the confirmed values. If No, ask what to change.
+  4) Feel free to infer the fields for the ticket based on what you think would be appropriate and suggest them to the user before creating the ticket
+  5) Avoid doing everything in one message, use multiple replies like a normal conversation
 
 - Constraints:
-  - Never invent or infer missing fields. Always ask the user to provide or choose valid enum values. If the department or priority isn’t one of the allowed values, ask the user to pick from the list.
   - Employees: do not request assignedTo. Managers/Admins: require assignedTo and block creation until provided.
   - If the user asks non-ticket questions (e.g., status checks), use the appropriate tool but do not create tickets.
   - If the user says "create a ticket" without giving department and complaint details (and assignedTo for manager/admin), ask for those first and do not call create_ticket yet.
@@ -46,10 +48,7 @@ You are an IT helpdesk assistant. Follow these rules strictly:
   - After department is selected and the role is manager/admin, you MUST call fetchAssignees and list its results for selection before confirmation and creation.
 
 - Response style:
-  - Use brief prompts to collect info, e.g.:
-    - "Which department should handle this? Choose one: support team A, software team, network team, infrastructure team, hardware team, database team."
-    - "What’s the issue title (1 line) and a short description (2–4 lines)?"
-    - "Priority? Choose one: low, medium, high, urgent."
+  - Some examples to gather information. Do not use directly, instead paraphrase them:
     - "Available assignees for <Dept>: 1) <Name> (id=<id>) — <count> open 2) <Name> (id=<id>) — <count> open … Pick a number or paste the id."
   - Before the tool call, summarize:
     - "Summary: Dept=<X>, Title=<Y>, Desc=<Z>, Priority=<P>[, AssignedTo=<A>]. Confirm to create the ticket?"
@@ -194,6 +193,84 @@ Department: ${args.department}`;
 }
 
 // === TOOL DEFINITIONS ===
+
+const queryMyTicketsRagTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context not available');
+
+    const resp = await fetch(`${BASE.replace(/\/$/, '')}/api/upload/tickets/me/rag/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
+      },
+      body: JSON.stringify({
+        query: String(input.query || '').trim(),
+        topK: input.topK ?? 5
+      }),
+      credentials: 'include'
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(JSON.stringify(json));
+    // Return compact structure; the model will ground answers on these snippets
+    return {
+      topK: json.topK,
+      items: (json.results || []).map(r => ({
+        text: r.text,
+        source: r?.metadata?.url || r?.metadata?.filename || 'unknown',
+        ticketId: r?.metadata?.ticketId,
+        score: r?.score
+      }))
+    };
+  },
+  {
+    name: 'queryMyTicketsRag',
+    description: 'Retrieve the most relevant snippets from the current user’s ticket attachments already indexed for RAG. Provide me the exact quuery of user',
+    schema: z.object({
+      query: z.string().min(1, 'query is required'),
+      topK: z.number().int().min(1).max(20).optional(),
+    }),
+  }
+);
+
+// Optional: index my assigned tickets (batch) before querying
+const indexMyTicketsRagTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context not available');
+
+    const resp = await fetch(`${BASE.replace(/\/$/, '')}/api/upload/tickets/me/rag/index`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
+      },
+      body: JSON.stringify({
+        project: input.project || 'tickets',
+        size: input.size ?? 800,
+        overlap: input.overlap ?? 150,
+        reindex: input.reindex ?? false
+      }),
+      credentials: 'include'
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(JSON.stringify(json));
+    return json;
+  },
+  {
+    name: 'indexMyTicketsRag',
+    description: 'Index attachments from tickets assigned to the current user into the vector store for RAG.',
+    schema: z.object({
+      project: z.string().optional(),
+      size: z.number().int().min(200).max(2000).optional(),
+      overlap: z.number().int().min(0).max(800).optional(),
+      reindex: z.boolean().optional()
+    }),
+  }
+);
 
 // Tool: Connect Gmail (returns authorize URL)
 const connectGmailTool = tool(
@@ -399,13 +476,20 @@ const fetchMyTicketsTool = tool(
         return "No tickets found for you";
       }
       
-      const byStatus = tickets.reduce((acc, t) => {
-        acc[t.status] = (acc[t.status] || 0) + 1;
-        return acc;
-      }, {});
-      
-      const summary = `You have ${tickets.length} ticket(s):\n` +
-        Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
+      // Sort tickets by createdAt descending (most recent first)
+      const sorted = [...tickets].sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.created_at || 0);
+        const dateB = new Date(b.createdAt || b.created_at || 0);
+        return dateB - dateA;
+      });
+
+      const recent = sorted.slice(0, 5);
+
+      const ticketLines = recent.map((t, idx) =>
+        `${idx + 1}. "${t.title}" | Priority: ${t.priority} | Status: ${t.status}`
+      ).join('\n');
+
+      const summary = `You have ${tickets.length} ticket(s).\nMost recent tickets:\n${ticketLines}`;
 
       console.log('User tickets fetched successfully');
       return summary;
@@ -515,7 +599,7 @@ const createTicketTool = tool(
 {
     name: 'createTicket',
     description:
-      'Create a helpdesk ticket. If any arguments are missing, the tool will infer them from the latest user message. Call only when you have all the relevant information and the user requests the creation of a ticket. Create the ticket with the same department as the user',
+      'Create a helpdesk ticket. Use only when you have all the relevant information and the user explicitly requests the creation of a ticket.',
     schema: z.object({
       title: z.string().optional(),
       description: z.string().optional(),
@@ -540,32 +624,40 @@ function setupChatbotRoutes(app) {
   console.log('🚀 Initializing AI Chatbot...');
 
   // Create tools map for easy access
-  const toolsMap = {
-    fetchMyTickets: fetchMyTicketsTool,
-    fetchTeamTickets: fetchTeamTicketsTool,
-    createTicket: createTicketTool,
-    connectGmail: connectGmailTool,
-    fetchGmail: fetchGmailTool,
-    createTicketsFromGmail: createTicketsFromGmailTool,
-    fetchAssignees: fetchAssigneesTool
-  };
+const toolsMap = {
+  fetchMyTickets: fetchMyTicketsTool,
+  fetchTeamTickets: fetchTeamTicketsTool,
+  createTicket: createTicketTool,
+  connectGmail: connectGmailTool,
+  fetchGmail: fetchGmailTool,
+  createTicketsFromGmail: createTicketsFromGmailTool,
+  // retrieveDocuments: retrieveDocumentsTool,
+  // ingestDocuments: ingestDocumentsTool,
+  fetchAssignees: fetchAssigneesTool,
+  queryMyTicketsRag: queryMyTicketsRagTool,
+  indexMyTicketsRag: indexMyTicketsRagTool
+};
 
-  // Initialize LLM with tools
-  const llm = new ChatGoogleGenerativeAI({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    temperature: 0.1,
-    apiKey: process.env.GoogleGenerativeAI || process.env.GOOGLE_API_KEY,
-  }).withConfig({
-    tools: [
-      fetchMyTicketsTool,
-      fetchTeamTicketsTool,
-      createTicketTool,
-      connectGmailTool,
-      fetchGmailTool,
-      createTicketsFromGmailTool,
-      fetchAssigneesTool
-    ]
-  });
+const llm = new ChatGoogleGenerativeAI({
+  model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  temperature: 0.1,
+  apiKey: process.env.GOOGLE_API_KEY
+}).withConfig({
+  tools: [
+    // retrieveDocumentsTool,
+    // ingestDocumentsTool,
+    fetchAssigneesTool,
+    fetchMyTicketsTool,
+    fetchTeamTicketsTool,
+    createTicketTool,
+    connectGmailTool,
+    fetchGmailTool,
+    createTicketsFromGmailTool,
+    queryMyTicketsRagTool,
+    indexMyTicketsRagTool
+  ]
+});
+
 
   app.post("/api/ai-chat", async (req, res) => {
     const { message } = req.body || {};
