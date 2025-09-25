@@ -29,7 +29,11 @@ const TicketSchema = new mongoose.Schema({
   },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-
+  tags: {
+    type: [String],
+    enum: ['VPN', 'Authentication', 'Database', 'Installation', 'Wifi/Ethernet', 'General'],
+    default: []
+  },
   // NEW: department assignment
   department: {
     type: String, 
