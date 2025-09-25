@@ -17,9 +17,45 @@ const appendHistory = (userId, role, content) => {
 };
 
 function buildMessages(userId, userText) {
-  const system = new SystemMessage(
-    "You are a helpful IT helpdesk assistant. Use tools for ticket queries. Be concise and clear."
-  );
+  const system = new SystemMessage(`
+You are an IT helpdesk assistant. Follow these rules strictly:
+
+- Core behavior:
+  - Be concise, clear, and professional in all replies. Ask one or two focused questions at a time. Do not create tickets until all required fields are explicitly confirmed. Always prefer clarification over guessing.
+
+- When the user asks for help or hints at an issue:
+  1) Determine if the intent is ticket-worthy. If unsure, ask a brief clarifying question first.
+  2) Collect and confirm these fields before any ticket creation:
+     - Department: one of ['support team A','software team','network team','infrastructure team','hardware team','database team'].
+     - Complaint details: a short title (1 line) and a brief description (2–4 lines).
+     - Priority: one of ['low','medium','high','urgent']. If unspecified, ask; do not assume.
+     - Role-aware assignment:
+       -As soon as the department is selected and the role is manager/admin, immediately call fetchAssignees with department=<chosen>. Do this before asking for confirmation. Present the returned users as a numbered list, ask for a pick by number or user id, and store assignedTo. Only then proceed to the final summary and confirmation.
+  3) Use a two-step confirmation:
+     - Summarize the gathered fields back to the user and ask "Confirm to create the ticket?" with Yes/No options.
+     - Only after an explicit Yes, call create_ticket with the confirmed values. If No, ask what to change.
+
+- Constraints:
+  - Never invent or infer missing fields. Always ask the user to provide or choose valid enum values. If the department or priority isn’t one of the allowed values, ask the user to pick from the list.
+  - Employees: do not request assignedTo. Managers/Admins: require assignedTo and block creation until provided.
+  - If the user asks non-ticket questions (e.g., status checks), use the appropriate tool but do not create tickets.
+  - If the user says "create a ticket" without giving department and complaint details (and assignedTo for manager/admin), ask for those first and do not call create_ticket yet.
+
+- Tool usage policy:
+  - Only call create_ticket after explicit user confirmation and after all required fields are collected and validated. Include assignedTo only when the role is manager/admin.
+  - After department is selected and the role is manager/admin, you MUST call fetchAssignees and list its results for selection before confirmation and creation.
+
+- Response style:
+  - Use brief prompts to collect info, e.g.:
+    - "Which department should handle this? Choose one: support team A, software team, network team, infrastructure team, hardware team, database team."
+    - "What’s the issue title (1 line) and a short description (2–4 lines)?"
+    - "Priority? Choose one: low, medium, high, urgent."
+    - "Available assignees for <Dept>: 1) <Name> (id=<id>) — <count> open 2) <Name> (id=<id>) — <count> open … Pick a number or paste the id."
+  - Before the tool call, summarize:
+    - "Summary: Dept=<X>, Title=<Y>, Desc=<Z>, Priority=<P>[, AssignedTo=<A>]. Confirm to create the ticket?"
+
+Adhere to this flow on every ticket request. Do not bypass confirmation or required fields.
+`);
 
   const historyTurns = getHistory(userId) || [];
 
@@ -72,8 +108,11 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 const structuredModel = genAI.getGenerativeModel({
   model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   systemInstruction:
-    'You are a helpdesk assistant. If a new ticket is needed, call create_ticket with the correct fields.',
+    `You are a helpdesk assistant designed to assist users. You will be asked for help with various technical issues. You must try to resolve trivial issues like login fails, connection issues, etc with helpful troubleshooting.
+If the problem is more complex, suggest creating a ticket and help the user create a ticket using the create_ticket tool provided to you with the correct fields. Do not jump straight to creating a ticket, first ensure you gather all the relvant information and then
+attempt to create a ticket. Ideally to create a ticket, you must have a description of the problem, the priority, the department to which the ticket should be assigned and some tags. Be helpful in your replies. Only create a ticket when you can't resolve the issue`,
 });
+
 
 const createTicketFunctionDeclarations = [
   {
@@ -110,7 +149,8 @@ async function parseCreateTicketArgs(req, userText) {
   const functionCalls = response.functionCalls?.() || [];
 
   if (!functionCalls.length || functionCalls[0].name !== 'create_ticket') {
-    throw new Error('Parser did not produce create_ticket arguments');
+    // Tolerate multi-turn flow while gathering fields
+    throw new Error('Need more details before creating a ticket');
   }
   const args = functionCalls[0].args || {};
 
@@ -146,9 +186,12 @@ async function postTicketToAPI(req, payload) {
 
 function summarizeTicket(args, apiResult) {
   const id = apiResult?.ticket_id || '(pending id)';
-  return `Ticket created successfully.\nID: ${id}\nTitle: ${args.title}\nPriority: ${args.priority}\nDepartment: ${args.department}`;
+  return `Ticket created successfully.
+ID: ${id}
+Title: ${args.title}
+Priority: ${args.priority}
+Department: ${args.department}`;
 }
-
 
 // === TOOL DEFINITIONS ===
 
@@ -287,6 +330,45 @@ const createTicketsFromGmailTool = tool(
   }
 );
 
+// Tool: Fetch recommended assignees for a department (manager/admin flow)
+const fetchAssigneesTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context missing');
+    const { department } = input || {};
+    if (!department) throw new Error('department is required');
+
+    const url = `http://localhost:5000/api/tickets/recommend-assignees?department=${encodeURIComponent(department)}`;
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: req.headers.authorization || '' }
+    });
+    const json = await r.json();
+    if (!r.ok) throw new Error(JSON.stringify(json));
+
+    const options = (json.recommendations || []).map((u, idx) => ({
+      index: idx + 1,
+      id: u._id,
+      name: u.name,
+      email: u.email,
+      assignedCount: u.assignedTicketCount
+    }));
+    return {
+      department,
+      count: options.length,
+      options,
+      summary: options.length
+        ? options.map(o => `${o.index}) ${o.name} (id=${o.id}) — ${o.assignedCount} open`).join('\n')
+        : 'No eligible assignees found for this department'
+    };
+  },
+  {
+    name: 'fetchAssignees',
+    description: 'Fetch top recommended assignees for a department to pick assignedTo (manager/admin only).only fetch employee under that department and not managers/admins',
+    schema: z.object({ department: z.string() })
+  }
+);
+
 const fetchMyTicketsTool = tool(
   async (input, config) => {
     const req = config?.configurable?.req;
@@ -421,18 +503,25 @@ const createTicketTool = tool(
       args = await parseCreateTicketArgs(req, rawUserMessage);
     }
 
+    // Guard for manager/admin: assignedTo must be provided
+    if ((req.user.role === 'manager' || req.user.role === 'admin') && !args.assignedTo) {
+      throw new Error('assignedTo required for manager/admin before creating ticket');
+    }
+
     // POST to API (server enforces RBAC/department policy)
     const result = await postTicketToAPI(req, args);
     return summarizeTicket(args, result);
   },
-  {
+{
     name: 'createTicket',
     description:
-      'Create a helpdesk ticket. If any arguments are missing, the tool will infer them from the latest user message.',
+      'Create a helpdesk ticket. If any arguments are missing, the tool will infer them from the latest user message. Call only when you have all the relevant information and the user requests the creation of a ticket. Create the ticket with the same department as the user',
     schema: z.object({
       title: z.string().optional(),
       description: z.string().optional(),
       priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+      tags: z.array(z.enum(['VPN', 'Database', 'Installation', 'General', 'Wifi/Ethernet', 'Authentication']))
+              .optional().describe("Tags describing the issue of the ticket, max 3"),
       department: z.enum([
         'support team A',
         'software team',
@@ -456,18 +545,26 @@ function setupChatbotRoutes(app) {
     fetchTeamTickets: fetchTeamTicketsTool,
     createTicket: createTicketTool,
     connectGmail: connectGmailTool,
-    // fetchMailAndCreateTickets: fetchMailAndCreateTicketsTool,
     fetchGmail: fetchGmailTool,
-    createTicketsFromGmail:createTicketsFromGmailTool
+    createTicketsFromGmail: createTicketsFromGmailTool,
+    fetchAssignees: fetchAssigneesTool
   };
 
   // Initialize LLM with tools
   const llm = new ChatGoogleGenerativeAI({
     model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
     temperature: 0.1,
-    apiKey: process.env.GOOGLE_API_KEY,
+    apiKey: process.env.GoogleGenerativeAI || process.env.GOOGLE_API_KEY,
   }).withConfig({
-    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, createTicketTool, connectGmailTool, fetchGmailTool, createTicketsFromGmailTool]
+    tools: [
+      fetchMyTicketsTool,
+      fetchTeamTicketsTool,
+      createTicketTool,
+      connectGmailTool,
+      fetchGmailTool,
+      createTicketsFromGmailTool,
+      fetchAssigneesTool
+    ]
   });
 
   app.post("/api/ai-chat", async (req, res) => {

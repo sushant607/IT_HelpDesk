@@ -20,23 +20,22 @@ async function countTicketsAssignedToUser(userId) {
 }
 
 // GET /api/tickets/recommend-assignees?department=
+// GET /api/tickets/recommend-assignees?department=&role=employee
 router.get('/recommend-assignees', authenticate, async (req, res) => {
   try {
-    const { department } = req.query || {};
+    const { department, role = 'employee' } = req.query || {};
+    const roleFilter = role ? { role } : {};
+    const users = await User
+      .find({ department: department.replace('+', ' '), ...roleFilter })
+      .select('name email role department');
 
-    // Get all users in the same department
-    const users = await User.find({ department: department.replace('+', ' ') }).select('name email role department');
-
-    // For each user, count assigned tickets
     const userLoads = await Promise.all(users.map(async (user) => {
       const count = await countTicketsAssignedToUser(user._id);
       return { user, assignedCount: count };
     }));
 
-    // Sort by assignedCount ascending
     userLoads.sort((a, b) => a.assignedCount - b.assignedCount);
 
-    // Return top 3 users
     const recommendations = userLoads.slice(0, 3).map(({ user, assignedCount }) => ({
       _id: user._id,
       name: user.name,
@@ -52,6 +51,7 @@ router.get('/recommend-assignees', authenticate, async (req, res) => {
     return res.status(500).json({ msg: 'recommend_error' });
   }
 });
+
 
 // GET /api/tickets?scope=me|team&status=&priority=&keywords=
 router.get('/', authenticate, async (req, res) => {
