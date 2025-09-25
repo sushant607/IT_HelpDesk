@@ -18,6 +18,58 @@ async function countTicketsAssignedToUser(userId) {
   if (!mongoose.Types.ObjectId.isValid(userId)) return 0;
   return await Ticket.countDocuments({ assignedTo: userId });
 }
+// PATCH /api/tickets/:id/status — update status only with RBAC
+// PUT /api/tickets/:id — update fields (including status) and return updated doc
+router.put('/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = { ...(req.body || {}) };
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ msg: 'invalid_id' });
+    }
+
+    const ticket = await Ticket.findById(id);
+    if (!ticket) return res.status(404).json({ msg: 'not_found' });
+
+    const allowed = await canUpdate(req, ticket);
+    if (!allowed) return res.status(403).json({ msg: 'forbidden' });
+
+    // Employees cannot change department/creator
+    if (req.user.role === 'employee') {
+      delete updates.department;
+      delete updates.createdBy;
+    }
+    // Managers/Admins cannot move across departments
+    if ((req.user.role === 'manager' || req.user.role === 'admin') &&
+        updates.department && updates.department !== ticket.department) {
+      return res.status(403).json({ msg: 'cannot move ticket across departments' });
+    }
+
+    // Optional: validate status enum
+    if (typeof updates.status !== 'undefined') {
+      const allowedStatuses = ['open','in_progress','resolved','closed'];
+      if (!allowedStatuses.includes(updates.status)) {
+        return res.status(400).json({ msg: 'invalid_status' });
+      }
+    }
+
+    ticket.set({ ...updates, updatedAt: new Date() });
+    await ticket.save();
+
+    const updated = await Ticket.findById(id)
+      .populate('createdBy', 'name email role department')
+      .populate('assignedTo', 'name email role department')
+      .populate('comments.author', 'name');
+
+    return res.json({ message: 'ticket_updated', ticket: updated });
+  } catch (e) {
+    console.error('PUT /tickets/:id error:', e);
+    return res.status(500).json({ msg: 'update_error' });
+  }
+});
+
+
 
 // GET /api/tickets/analytics/tags - Get tag-wise ticket analytics
 router.get('/analytics/tags', authenticate, async (req, res) => {
@@ -587,51 +639,51 @@ router.post('/:id/resolve', authenticate, requireRole('manager', 'admin'), async
 
 // GET /api/tickets/:id — fetch a single ticket by id with RBAC
 router.get('/:id', authenticate, async (req, res) => {
-    try {
-      const { id } = req.params;
-  
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({ msg: 'invalid_id' });
-      }
-  
-      const ticket = await Ticket.findById(id)
-        .populate('createdBy', 'name email role department')
-        .populate('assignedTo', 'name email role department')
-        .populate(  "comments.author", "name");
-
-  console.log(ticket.comments);
-
-      if (!ticket) {
-        return res.status(404).json({ msg: 'not_found' });
-      }
-  
-      const isCreator = ticket.createdBy && ticket.createdBy._id?.toString() === req.user.id;
-      const isAssignee = ticket.assignedTo && ticket.assignedTo._id?.toString() === req.user.id;
-      const sameDept = ticket.department === req.user.department;
-  
-      // Employees: can view if creator or assignee only
-      if (req.user.role === 'employee') {
-        if (isCreator || isAssignee) {
-          return res.json({ ticket });
-        }
-        return res.status(403).json({ msg: 'forbidden' });
-      }
-  
-      // Managers/Admins: must be in same department as the ticket
-      if (req.user.role === 'manager' || req.user.role === 'admin') {
-        if (sameDept || isCreator || isAssignee) {
-          return res.json({ ticket });
-        }
-        return res.status(403).json({ msg: 'cross-department access forbidden' });
-      }
-  
-      // Default deny
-      return res.status(403).json({ msg: 'forbidden' });
-    } catch (e) {
-      console.error('GET /tickets/:id error:', e);
-      return res.status(500).json({ msg: 'fetch_error' });
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ msg: 'Invalid ticket ID' });
     }
-  });
+
+    const ticket = await Ticket.findById(id)
+      .populate('createdBy', 'name email role department')
+      .populate('assignedTo', 'name email role department')
+      .populate('comments.author', 'name')
+      .lean(); // Add .lean() to get plain JS object instead of Mongoose document
+
+    if (!ticket) {
+      return res.status(404).json({ msg: 'Ticket not found' });
+    }
+
+    // RBAC checks (keep existing logic)
+    const isCreator = ticket.createdBy && ticket.createdBy._id?.toString() === req.user.id;
+    const isAssignee = ticket.assignedTo && ticket.assignedTo._id?.toString() === req.user.id;
+    const sameDept = ticket.department === req.user.department;
+
+    if (req.user.role === 'employee') {
+      if (!(isCreator || isAssignee)) {
+        return res.status(403).json({ msg: 'Forbidden' });
+      }
+    } else if (req.user.role === 'manager' || req.user.role === 'admin') {
+      if (!(sameDept || isCreator || isAssignee)) {
+        return res.status(403).json({ msg: 'Cross-department access forbidden' });
+      }
+    } else {
+      return res.status(403).json({ msg: 'Forbidden' });
+    }
+
+    // Ensure attachments is always an array with proper structure
+    if (!Array.isArray(ticket.attachments)) {
+      ticket.attachments = [];
+    }
+
+    return res.json({ ticket }); // Wrap in object for consistency
+  } catch (e) {
+    console.error('GET /tickets/:id error:', e);
+    return res.status(500).json({ msg: 'Server error' });
+  }
+});
+
   
 // PATCH /api/tickets/:id/assign — assign or unassign a ticket with RBAC
 router.patch('/:id/assign', authenticate, requireRole('manager', 'admin'), async (req, res) => {
