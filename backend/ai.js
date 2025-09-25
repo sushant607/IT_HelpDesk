@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { HumanMessage, SystemMessage, AIMessage } = require('@langchain/core/messages');
 const { z } = require('zod');
 const { tool } = require('@langchain/core/tools');
+
 const fetch = require('node-fetch');
 
 // In-memory conversation store
@@ -192,6 +193,84 @@ Department: ${args.department}`;
 }
 
 // === TOOL DEFINITIONS ===
+
+const queryMyTicketsRagTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context not available');
+
+    const resp = await fetch(`${BASE.replace(/\/$/, '')}/api/upload/tickets/me/rag/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
+      },
+      body: JSON.stringify({
+        query: String(input.query || '').trim(),
+        topK: input.topK ?? 5
+      }),
+      credentials: 'include'
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(JSON.stringify(json));
+    // Return compact structure; the model will ground answers on these snippets
+    return {
+      topK: json.topK,
+      items: (json.results || []).map(r => ({
+        text: r.text,
+        source: r?.metadata?.url || r?.metadata?.filename || 'unknown',
+        ticketId: r?.metadata?.ticketId,
+        score: r?.score
+      }))
+    };
+  },
+  {
+    name: 'queryMyTicketsRag',
+    description: 'Retrieve the most relevant snippets from the current user’s ticket attachments already indexed for RAG. Provide me the exact quuery of user',
+    schema: z.object({
+      query: z.string().min(1, 'query is required'),
+      topK: z.number().int().min(1).max(20).optional(),
+    }),
+  }
+);
+
+// Optional: index my assigned tickets (batch) before querying
+const indexMyTicketsRagTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context not available');
+
+    const resp = await fetch(`${BASE.replace(/\/$/, '')}/api/upload/tickets/me/rag/index`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
+      },
+      body: JSON.stringify({
+        project: input.project || 'tickets',
+        size: input.size ?? 800,
+        overlap: input.overlap ?? 150,
+        reindex: input.reindex ?? false
+      }),
+      credentials: 'include'
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(JSON.stringify(json));
+    return json;
+  },
+  {
+    name: 'indexMyTicketsRag',
+    description: 'Index attachments from tickets assigned to the current user into the vector store for RAG.',
+    schema: z.object({
+      project: z.string().optional(),
+      size: z.number().int().min(200).max(2000).optional(),
+      overlap: z.number().int().min(0).max(800).optional(),
+      reindex: z.boolean().optional()
+    }),
+  }
+);
 
 // Tool: Connect Gmail (returns authorize URL)
 const connectGmailTool = tool(
@@ -545,32 +624,40 @@ function setupChatbotRoutes(app) {
   console.log('🚀 Initializing AI Chatbot...');
 
   // Create tools map for easy access
-  const toolsMap = {
-    fetchMyTickets: fetchMyTicketsTool,
-    fetchTeamTickets: fetchTeamTicketsTool,
-    createTicket: createTicketTool,
-    connectGmail: connectGmailTool,
-    fetchGmail: fetchGmailTool,
-    createTicketsFromGmail: createTicketsFromGmailTool,
-    fetchAssignees: fetchAssigneesTool
-  };
+const toolsMap = {
+  fetchMyTickets: fetchMyTicketsTool,
+  fetchTeamTickets: fetchTeamTicketsTool,
+  createTicket: createTicketTool,
+  connectGmail: connectGmailTool,
+  fetchGmail: fetchGmailTool,
+  createTicketsFromGmail: createTicketsFromGmailTool,
+  // retrieveDocuments: retrieveDocumentsTool,
+  // ingestDocuments: ingestDocumentsTool,
+  fetchAssignees: fetchAssigneesTool,
+  queryMyTicketsRag: queryMyTicketsRagTool,
+  indexMyTicketsRag: indexMyTicketsRagTool
+};
 
-  // Initialize LLM with tools
-  const llm = new ChatGoogleGenerativeAI({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    temperature: 0.8,
-    apiKey: process.env.GoogleGenerativeAI || process.env.GOOGLE_API_KEY,
-  }).withConfig({
-    tools: [
-      fetchMyTicketsTool,
-      fetchTeamTicketsTool,
-      createTicketTool,
-      connectGmailTool,
-      fetchGmailTool,
-      createTicketsFromGmailTool,
-      fetchAssigneesTool
-    ]
-  });
+const llm = new ChatGoogleGenerativeAI({
+  model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  temperature: 0.1,
+  apiKey: process.env.GOOGLE_API_KEY
+}).withConfig({
+  tools: [
+    // retrieveDocumentsTool,
+    // ingestDocumentsTool,
+    fetchAssigneesTool,
+    fetchMyTicketsTool,
+    fetchTeamTicketsTool,
+    createTicketTool,
+    connectGmailTool,
+    fetchGmailTool,
+    createTicketsFromGmailTool,
+    queryMyTicketsRagTool,
+    indexMyTicketsRagTool
+  ]
+});
+
 
   app.post("/api/ai-chat", async (req, res) => {
     const { message } = req.body || {};
