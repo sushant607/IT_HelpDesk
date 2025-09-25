@@ -3,6 +3,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { HumanMessage, SystemMessage, AIMessage } = require('@langchain/core/messages');
 const { z } = require('zod');
 const { tool } = require('@langchain/core/tools');
+
 const fetch = require('node-fetch');
 
 // In-memory conversation store
@@ -16,10 +17,46 @@ const appendHistory = (userId, role, content) => {
   }
 };
 
-function buildMessages(userId, userText) {
-  const system = new SystemMessage(
-    "You are a helpful IT helpdesk assistant. Use tools for ticket queries. Be concise and clear."
-  );
+function buildMessages(userId, userText, userRole) {
+  const system = new SystemMessage(`
+You are an IT helpdesk assistant. Follow these rules strictly:
+- The user you are currently interacting with is a ${userRole}. Treat them accordingly.
+
+- Core behavior:
+  - Be clear, and professional in all replies. Ask one or two focused questions at a time. Do not create tickets until all required fields are explicitly confirmed. Always prefer clarification over guessing.
+
+- When the user asks for help or hints at an issue:
+  1) Determine if the issue is ticket-worthy. If unsure, ask a brief clarifying question first. Suggest the creation of a ticket to the user and then upon confirmation, try to create one.
+  2) Collect and confirm these fields before any ticket creation. Don't just ask, make your own suggestion alongside asking too:
+     - Department: one of ['support team A','software team','network team','infrastructure team','hardware team','database team'].
+     - Complaint details: a short title (1 line) and a brief description (2–4 lines).
+     - Priority: one of ['low','medium','high','urgent']. If unspecified, ask; do not assume.
+     - Role-aware assignment:
+       -As soon as the department is selected and the role is manager/admin, immediately call fetchAssignees with department=<chosen>. Do this before asking for confirmation. Present the returned users as a numbered list, ask for a pick by number or user id, and store assignedTo. Only then proceed to the final summary and confirmation.
+  3) Use a two-step confirmation:
+     - Summarize the gathered fields back to the user and ask "Confirm to create the ticket?" with Yes/No options.
+     - Only after an explicit Yes, call create_ticket with the confirmed values. If No, ask what to change.
+  4) Feel free to infer the fields for the ticket based on what you think would be appropriate and suggest them to the user before creating the ticket
+  5) Avoid doing everything in one message, use multiple replies like a normal conversation
+  6) In case the user is a manager, make sure you call the fetch assignees tool and give the user a choice of ticket assignees before you create the ticket
+
+- Constraints:
+  - Employees: do not request assignedTo. Managers/Admins: require assignedTo and block creation until provided.
+  - If the user asks non-ticket questions (e.g., status checks), use the appropriate tool but do not create tickets.
+  - If the user says "create a ticket" without giving department and complaint details (and assignedTo for manager/admin), ask for those first and do not call create_ticket yet.
+  - If you do call fetchRecommendedAssignees, call it only after you have enough context for the tickets. Make sure you ask the user whether they want some suggestions for assignees first
+
+- Tool usage policy:
+  - Only call create_ticket after explicit user confirmation and after all required fields are collected and validated. Include assignedTo only when the role is manager/admin.
+
+- Response style:
+  - Some examples to gather information. Do not use directly, instead paraphrase them:
+    - "Available assignees for <Dept>: 1) <Name> (id=<id>) — <count> open 2) <Name> (id=<id>) — <count> open … Pick a number or paste the id."
+  - Before the tool call, summarize:
+    - "Summary: Dept=<X>, Title=<Y>, Desc=<Z>, Priority=<P>[, AssignedTo=<A>]. Confirm to create the ticket?"
+
+Adhere to this flow on every ticket request. Do not bypass confirmation or required fields.
+`);
 
   const historyTurns = getHistory(userId) || [];
 
@@ -72,8 +109,11 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 const structuredModel = genAI.getGenerativeModel({
   model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   systemInstruction:
-    'You are a helpdesk assistant. If a new ticket is needed, call create_ticket with the correct fields.',
+    `You are a helpdesk assistant designed to assist users. You will be asked for help with various technical issues. You must try to resolve trivial issues like login fails, connection issues, etc with helpful troubleshooting.
+If the problem is more complex, suggest creating a ticket and help the user create a ticket using the create_ticket tool provided to you with the correct fields. Do not jump straight to creating a ticket, first ensure you gather all the relvant information and then
+attempt to create a ticket. Ideally to create a ticket, you must have a description of the problem, the priority, the department to which the ticket should be assigned and some tags. Be helpful in your replies. Only create a ticket when you can't resolve the issue`,
 });
+
 
 const createTicketFunctionDeclarations = [
   {
@@ -110,7 +150,8 @@ async function parseCreateTicketArgs(req, userText) {
   const functionCalls = response.functionCalls?.() || [];
 
   if (!functionCalls.length || functionCalls[0].name !== 'create_ticket') {
-    throw new Error('Parser did not produce create_ticket arguments');
+    // Tolerate multi-turn flow while gathering fields
+    throw new Error('Need more details before creating a ticket');
   }
   const args = functionCalls[0].args || {};
 
@@ -146,11 +187,92 @@ async function postTicketToAPI(req, payload) {
 
 function summarizeTicket(args, apiResult) {
   const id = apiResult?.ticket_id || '(pending id)';
-  return `Ticket created successfully.\nID: ${id}\nTitle: ${args.title}\nPriority: ${args.priority}\nDepartment: ${args.department}`;
+  return `Ticket created successfully.
+ID: ${id}
+Title: ${args.title}
+Priority: ${args.priority}
+Department: ${args.department}`;
 }
 
-
 // === TOOL DEFINITIONS ===
+
+const queryMyTicketsRagTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context not available');
+
+    const resp = await fetch(`${BASE.replace(/\/$/, '')}/api/upload/tickets/me/rag/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
+      },
+      body: JSON.stringify({
+        query: String(input.query || '').trim(),
+        topK: input.topK ?? 5
+      }),
+      credentials: 'include'
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(JSON.stringify(json));
+    // Return compact structure; the model will ground answers on these snippets
+    return {
+      topK: json.topK,
+      items: (json.results || []).map(r => ({
+        text: r.text,
+        source: r?.metadata?.url || r?.metadata?.filename || 'unknown',
+        ticketId: r?.metadata?.ticketId,
+        score: r?.score
+      }))
+    };
+  },
+  {
+    name: 'queryMyTicketsRag',
+    description: 'Retrieve the most relevant snippets from the current user’s ticket attachments already indexed for RAG. Provide me the exact quuery of user',
+    schema: z.object({
+      query: z.string().min(1, 'query is required'),
+      topK: z.number().int().min(1).max(20).optional(),
+    }),
+  }
+);
+
+// Optional: index my assigned tickets (batch) before querying
+const indexMyTicketsRagTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context not available');
+
+    const resp = await fetch(`${BASE.replace(/\/$/, '')}/api/upload/tickets/me/rag/index`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: req.headers.authorization || ''
+      },
+      body: JSON.stringify({
+        project: input.project || 'tickets',
+        size: input.size ?? 800,
+        overlap: input.overlap ?? 150,
+        reindex: input.reindex ?? false
+      }),
+      credentials: 'include'
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(JSON.stringify(json));
+    return json;
+  },
+  {
+    name: 'indexMyTicketsRag',
+    description: 'Index attachments from tickets assigned to the current user into the vector store for RAG.',
+    schema: z.object({
+      project: z.string().optional(),
+      size: z.number().int().min(200).max(2000).optional(),
+      overlap: z.number().int().min(0).max(800).optional(),
+      reindex: z.boolean().optional()
+    }),
+  }
+);
 
 // Tool: Connect Gmail (returns authorize URL)
 const connectGmailTool = tool(
@@ -159,9 +281,9 @@ const connectGmailTool = tool(
     if (!req) throw new Error('Request context missing');
     const r = await fetch('http://localhost:5000/api/gmail/auth/url', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: req.headers.authorization || ''
+      headers: { 
+        'Content-Type': 'application/json', 
+        Authorization: req.headers.authorization || '' 
       }
     });
     const text = await r.text();
@@ -183,9 +305,9 @@ const fetchGmailTool = tool(
     if (!req) throw new Error('Request context missing');
     const r = await fetch('http://localhost:5000/api/gmail/fetch', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: req.headers.authorization || ''
+      headers: { 
+        'Content-Type': 'application/json', 
+        Authorization: req.headers.authorization || '' 
       },
       body: JSON.stringify({
         limit: input?.limit ?? 20,
@@ -219,9 +341,9 @@ const createTicketsFromGmailTool = tool(
     // 1. Fetch mails
     const fetchResp = await fetch('http://localhost:5000/api/gmail/fetch', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: req.headers.authorization || ''
+      headers: { 
+        'Content-Type': 'application/json', 
+        Authorization: req.headers.authorization || '' 
       },
       body: JSON.stringify({
         limit: input?.limit ?? 20,
@@ -237,7 +359,7 @@ const createTicketsFromGmailTool = tool(
     const fetchJson = await fetchResp.json();
 
     // 2. Filter mails where subject contains "TICKET" (case insensitive)
-    const filtered = (fetchJson.candidates || []).filter(c =>
+    const filtered = (fetchJson.candidates || []).filter(c => 
       c.title && c.title.toLowerCase().includes('ticket')
     );
 
@@ -253,9 +375,9 @@ const createTicketsFromGmailTool = tool(
       };
       const ticketResp = await fetch('http://localhost:5000/api/tickets', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: req.headers.authorization || ''
+        headers: { 
+          'Content-Type': 'application/json', 
+          Authorization: req.headers.authorization || '' 
         },
         body: JSON.stringify(ticketBody)
       });
@@ -287,6 +409,45 @@ const createTicketsFromGmailTool = tool(
   }
 );
 
+// Tool: Fetch recommended assignees for a department (manager/admin flow)
+const fetchRecommendedAssigneesTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context missing');
+    const { department } = input || {};
+    if (!department) throw new Error('department is required');
+
+    const url = `http://localhost:5000/api/tickets/recommend-assignees?department=${encodeURIComponent(department)}`;
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: req.headers.authorization || '' }
+    });
+    const json = await r.json();
+    if (!r.ok) throw new Error(JSON.stringify(json));
+
+    const options = (json.recommendations || []).map((u, idx) => ({
+      index: idx + 1,
+      id: u._id,
+      name: u.name,
+      email: u.email,
+      assignedCount: u.assignedTicketCount
+    }));
+    return {
+      department,
+      count: options.length,
+      options,
+      summary: options.length
+        ? 'Here are a list of the recommended assignee\'s for this issue, whom would like to assign it to?\n' + options.map(o => `${o.index}) ${o.name} (id=${o.id}) — ${o.assignedCount} open`).join('\n')
+        : 'No eligible assignees found for this department'
+    };
+  },
+  {
+    name: 'fetchRecommendedAssignees',
+    description: 'Fetch top recommended assignees for a department to pick assignedTo (manager/admin only).only fetch employee under that department and not managers/admins',
+    schema: z.object({ department: z.string() })
+  }
+);
+
 const fetchMyTicketsTool = tool(
   async (input, config) => {
     const req = config?.configurable?.req;
@@ -300,30 +461,37 @@ const fetchMyTicketsTool = tool(
       if (input.status) query.append('status', input.status);
       if (input.priority) query.append('priority', input.priority);
       if (input.keywords?.length > 0) query.append('keywords', input.keywords.join('+'));
-
+      
       const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
         headers
       });
-
+      
       if (!response.ok) {
         throw new Error(`API Error: ${response.statusText}`);
       }
-
+      
       const data = await response.json();
       const tickets = data.tickets || [];
-
+      
       if (tickets.length === 0) {
         return "No tickets found for you";
       }
+      
+      // Sort tickets by createdAt descending (most recent first)
+      const sorted = [...tickets].sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.created_at || 0);
+        const dateB = new Date(b.createdAt || b.created_at || 0);
+        return dateB - dateA;
+      });
 
-      const byStatus = tickets.reduce((acc, t) => {
-        acc[t.status] = (acc[t.status] || 0) + 1;
-        return acc;
-      }, {});
+      const recent = sorted.slice(0, 5);
 
-      const summary = `You have ${tickets.length} ticket(s):\n` +
-        Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
+      const ticketLines = recent.map((t, idx) =>
+        `${idx + 1}. [ID: ${t.ticket_id || t._id || 'N/A'}] "${t.title}" | Priority: ${t.priority} | Status: ${t.status}`
+      ).join('\n');
+
+      const summary = `You have ${tickets.length} ticket(s).\nMost recent tickets:\n${ticketLines}`;
 
       console.log('User tickets fetched successfully');
       return summary;
@@ -353,39 +521,46 @@ const fetchTeamTicketsTool = tool(
       if (req.user.role !== 'manager' && req.user.role !== 'admin') {
         return "Sorry, only managers and admins can view team tickets.";
       }
-
+      
       console.log('🔧 Fetching team tickets...');
       const headers = { 'Authorization': req.headers.authorization };
       const query = new URLSearchParams({ scope: 'team' });
-
+      
       if (input.status) query.append('status', input.status);
       if (input.priority) query.append('priority', input.priority);
       if (input.keywords?.length > 0) query.append('keywords', input.keywords.join('+'));
-
+      
       const response = await fetch(`http://localhost:5000/api/tickets?${query.toString()}`, {
         method: 'GET',
         headers
       });
-
+      
       if (!response.ok) {
         throw new Error(`API Error: ${response.statusText}`);
       }
-
+      
       const data = await response.json();
       const tickets = data.tickets || [];
-
+      
       if (tickets.length === 0) {
         return "No tickets found for your team.";
       }
+      
+      // Sort tickets by createdAt descending (most recent first)
+      const sorted = [...tickets].sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.created_at || 0);
+        const dateB = new Date(b.createdAt || b.created_at || 0);
+        return dateB - dateA;
+      });
 
-      const byStatus = tickets.reduce((acc, t) => {
-        acc[t.status] = (acc[t.status] || 0) + 1;
-        return acc;
-      }, {});
+      const recent = sorted.slice(0, 5);
 
-      const summary = `Your team has ${tickets.length} ticket(s):\n` +
-        Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
+      const ticketLines = recent.map((t, idx) =>
+        `${idx + 1}. "${t.title}" | Priority: ${t.priority} | Status: ${t.status}`
+      ).join('\n');
 
+      const summary = `You have ${tickets.length} ticket(s).\nMost recent tickets:\n${ticketLines}`;
+      
       console.log('Team tickets fetched successfully');
       return summary;
     } catch (error) {
@@ -421,14 +596,19 @@ const createTicketTool = tool(
       args = await parseCreateTicketArgs(req, rawUserMessage);
     }
 
+    // Guard for manager/admin: assignedTo must be provided
+    if ((req.user.role === 'manager' || req.user.role === 'admin') && !args.assignedTo) {
+      throw new Error('assignedTo required for manager/admin before creating ticket');
+    }
+
     // POST to API (server enforces RBAC/department policy)
     const result = await postTicketToAPI(req, args);
     return summarizeTicket(args, result);
   },
-  {
+{
     name: 'createTicket',
     description:
-      'Create a helpdesk ticket. If any arguments are missing, the tool will infer them from the latest user message.',
+      'Create a helpdesk ticket. Use only when you have all the relevant information and the user explicitly requests the creation of a ticket.',
     schema: z.object({
       title: z.string().optional(),
       description: z.string().optional(),
@@ -443,6 +623,7 @@ const createTicketTool = tool(
         'hardware team',
         'database team',
       ]).optional(),
+      assignedTo: z.string().optional().describe("Only use when user is a manager, should contain the ID of an employee to assign the ticket to")
     }),
   }
 );
@@ -453,24 +634,40 @@ function setupChatbotRoutes(app) {
   console.log('🚀 Initializing AI Chatbot...');
 
   // Create tools map for easy access
-  const toolsMap = {
-    fetchMyTickets: fetchMyTicketsTool,
-    fetchTeamTickets: fetchTeamTicketsTool,
-    createTicket: createTicketTool,
-    connectGmail: connectGmailTool,
-    // fetchMailAndCreateTickets: fetchMailAndCreateTicketsTool,
-    fetchGmail: fetchGmailTool,
-    createTicketsFromGmail: createTicketsFromGmailTool
-  };
+const toolsMap = {
+  fetchMyTickets: fetchMyTicketsTool,
+  fetchTeamTickets: fetchTeamTicketsTool,
+  createTicket: createTicketTool,
+  connectGmail: connectGmailTool,
+  fetchGmail: fetchGmailTool,
+  createTicketsFromGmail: createTicketsFromGmailTool,
+  // retrieveDocuments: retrieveDocumentsTool,
+  // ingestDocuments: ingestDocumentsTool,
+  fetchRecommendedAssignees: fetchRecommendedAssigneesTool,
+  queryMyTicketsRag: queryMyTicketsRagTool,
+  indexMyTicketsRag: indexMyTicketsRagTool
+};
 
-  // Initialize LLM with tools
-  const llm = new ChatGoogleGenerativeAI({
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    temperature: 0.1,
-    apiKey: process.env.GOOGLE_API_KEY,
-  }).withConfig({
-    tools: [fetchMyTicketsTool, fetchTeamTicketsTool, createTicketTool, connectGmailTool, fetchGmailTool, createTicketsFromGmailTool]
-  });
+const llm = new ChatGoogleGenerativeAI({
+  model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  temperature: 0.1,
+  apiKey: process.env.GOOGLE_API_KEY
+}).withConfig({
+  tools: [
+    // retrieveDocumentsTool,
+    // ingestDocumentsTool,
+    fetchRecommendedAssigneesTool,
+    fetchMyTicketsTool,
+    fetchTeamTicketsTool,
+    createTicketTool,
+    connectGmailTool,
+    fetchGmailTool,
+    createTicketsFromGmailTool,
+    queryMyTicketsRagTool,
+    indexMyTicketsRagTool
+  ]
+});
+
 
   app.post("/api/ai-chat", async (req, res) => {
     const { message } = req.body || {};
@@ -478,12 +675,13 @@ function setupChatbotRoutes(app) {
       return res.status(400).json({ error: "Message is required as a non-empty string." });
     }
     const userId = req.user?.id;
+    const userRole = req.user?.role;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
+  
     appendHistory(userId, "user", message.trim());
-
+  
     try {
-      const messages = buildMessages(userId, message);
+      const messages = buildMessages(userId, message, userRole);
 
       // just making sure
       const types = messages.map((m) => (typeof m._getType === 'function' ? m._getType() : 'unknown'));
@@ -497,23 +695,23 @@ function setupChatbotRoutes(app) {
         });
       }
       const response = await llm.invoke(messages, { configurable: { req } });
-
+  
       const toolCalls = response.tool_calls || [];
       if (toolCalls.length > 0) {
         const toolCall = toolCalls[0];
         const toolName = toolCall.name;
         const toolArgs = toolCall.args || {};
-
+      
         if (toolsMap[toolName]) {
           try {
             const toolResult = await toolsMap[toolName].invoke(toolArgs, {
               configurable: { req, rawUserMessage: message },
             });
-
+      
             const reply = typeof toolResult === 'string'
               ? toolResult
               : (toolResult?.summary || JSON.stringify(toolResult));
-
+      
             appendHistory(userId, 'assistant', reply);
             return res.json({ reply, toolUsed: toolName, timestamp: new Date().toISOString() });
           } catch (toolError) {
@@ -522,7 +720,7 @@ function setupChatbotRoutes(app) {
             return res.json({ reply: errorReply, error: toolError.message, timestamp: new Date().toISOString() });
           }
         }
-      }
+      }  
       const reply = typeof response.content === 'string'
         ? response.content
         : Array.isArray(response.content)
@@ -536,7 +734,7 @@ function setupChatbotRoutes(app) {
       return res.json({ reply, error: err.message, timestamp: new Date().toISOString() });
     }
   });
-
+  
   console.log('AI Chatbot setup complete');
 }
 
