@@ -15,7 +15,7 @@ const app = express();
 // --- Core Middleware ---
 app.use(helmet()); // Basic security headers
 app.use(cors({
-  origin: process.env.FRONTEND_ORIGIN || 'http://localhost:8080', // Your frontend URL
+  origin: process.env.FRONTEND_ORIGIN || 'http://localhost:8080' || 'http://localhost:8081', // Your frontend URL
   credentials: true, // Important for sending cookies with requests
 }));
 app.use(express.json()); // For parsing application/json

@@ -27,162 +27,145 @@ export default function ChatbotPage() {
     }
   ]);
   const [input, setInput] = useState("");
+  const [answerFromAttachments, setAnswerFromAttachments] = useState(false); // NEW
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
-  const detectIntent = (message: string): string => {
-    const lowerMessage = message.toLowerCase();
+  // Helper: turn raw URLs into "click here" links while preserving text
+  function renderWithLinks(text: string): React.ReactNode[] {
+    // First, normalize markdown-style [label](url) by replacing with just the URL token
+    const mdLink = /\[[^\]]+\]\((https?:\/\/[^\s)]+)\)/g;
+    const normalized = text.replace(mdLink, '$1');
 
-    if (lowerMessage.includes("password") && (lowerMessage.includes("reset") || lowerMessage.includes("forgot") || lowerMessage.includes("change"))) {
-      return "password_reset";
+    // Now split on plain URLs and rebuild as JSX
+    const urlRegex = /(https?:\/\/[^\s)]+)(?=[\s)|\]]|$)/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    let idx = 1; // for optional index tags like [1], [2]
+    while ((match = urlRegex.exec(normalized)) !== null) {
+      const url = match[1];
+      // Push preceding text
+      if (match.index > lastIndex) {
+        parts.push(normalized.slice(lastIndex, match.index));
+      }
+      // Push clickable link labeled "click here"
+      parts.push(
+        <a
+          key={`${url}-${idx}`}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary underline"
+        >
+          click here
+        </a>
+      );
+      lastIndex = match.index + url.length;
+      idx += 1;
     }
-
-    if (lowerMessage.includes("software") || lowerMessage.includes("install") || lowerMessage.includes("application") || lowerMessage.includes("program")) {
-      return "software_issue";
+    // Remainder
+    if (lastIndex < normalized.length) {
+      parts.push(normalized.slice(lastIndex));
     }
+    return parts;
+  }
 
-    if (lowerMessage.includes("network") || lowerMessage.includes("internet") || lowerMessage.includes("wifi") || lowerMessage.includes("connection")) {
-      return "network_issue";
-    }
-
-    if (lowerMessage.includes("hardware") || lowerMessage.includes("computer") || lowerMessage.includes("laptop") || lowerMessage.includes("printer")) {
-      return "hardware_issue";
-    }
-
-    return "general_issue";
-  };
-
-  const generateBotResponse = (intent: string, userMessage: string): { content: string; ticketId?: string } => {
-    switch (intent) {
-      case "password_reset":
-        return {
-          content: `I can help you with password reset! Here are the steps:
-
-1. Go to the company login page
-2. Click "Forgot Password"
-3. Enter your email address
-4. Check your email for reset instructions
-5. Follow the link and create a new password
-
-If you're still having issues, I can create a ticket for our IT team. Your password reset request has been auto-resolved! ✅`,
-          ticketId: `PWD-${Date.now()}`
-        };
-
-      case "software_issue":
-        return {
-          content: `I've created a ticket for your software issue. Our IT team will help you with the installation or configuration.
-
-**Ticket ID: SW-${Date.now()}**
-
-In the meantime, please:
-- Make sure you have admin rights on your computer
-- Check if the software is available in our approved software list
-- Try restarting your computer if it's an installation issue
-
-Our team will contact you within 24 hours!`,
-          ticketId: `SW-${Date.now()}`
-        };
-
-      case "network_issue":
-        return {
-          content: `I've created a ticket for your network connectivity issue.
-
-**Ticket ID: NET-${Date.now()}**
-
-Quick troubleshooting steps you can try:
-- Restart your router/modem
-- Check cable connections
-- Try connecting to a different network
-- Restart your device's network adapter
-
-Our network team will investigate and contact you soon!`,
-          ticketId: `NET-${Date.now()}`
-        };
-
-      case "hardware_issue":
-        return {
-          content: `I've created a ticket for your hardware issue.
-
-**Ticket ID: HW-${Date.now()}**
-
-Please provide additional details:
-- What type of hardware is affected?
-- When did the issue start?
-- Any error messages or unusual behavior?
-
-Our hardware support team will reach out to schedule a diagnostic or replacement if needed.`,
-          ticketId: `HW-${Date.now()}`
-        };
-
-      default:
-        return {
-          content: `I've created a general support ticket for your request.
-
-**Ticket ID: GEN-${Date.now()}**
-
-Our IT support team will review your request and get back to you shortly. Please provide any additional details that might help us resolve your issue faster.
-
-Is there anything else I can help you with today?`,
-          ticketId: `GEN-${Date.now()}`
-        };
-    }
-  };
+  // Wrapper: only apply to bot messages
+  function renderMessageContent(message: ChatMessage) {
+    if (message.sender !== "bot") return message.content;
+    return <div className="whitespace-pre-wrap">{renderWithLinks(message.content)}</div>;
+  }
 
   const handleSendMessage = async () => {
     if (!input.trim()) return;
-
+  
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       content: input,
       sender: "user",
       timestamp: new Date(),
     };
-
     setMessages(prev => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
-
-    // Simulate AI processing delay
-    const response = await apiService.chatMessage({ message: input });
-    console.log(response.reply);
-    const ticketId = '';
-    const lines = response.reply.split("\n");
-
-    // Extract ticket info
-    let tickets = lines
-      .map(line => {
-        const match = line.match(/\[ID:\s*([a-f0-9]+)\]/i);
-        if (match) {
-          const id = match[1];
-          const cleanLine = line.replace(/\[ID:.*?\]\s*/, ""); // remove [ID: ...]
-          return { id, text: cleanLine.trim() };
+  
+    try {
+      if (answerFromAttachments) {
+        console.log("RAG mode enabled");
+        const token = localStorage.getItem('auth_token');
+        
+        // Use relative URL to leverage dev proxy
+        const resp = await fetch('http://localhost:5000/api/upload/tickets/me/rag/query', {
+          method: "POST",
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            query: userMessage.content,
+            topK: 5,
+            ensureIndex: true,
+            reindex: false
+          }),
+        });
+  
+        if (!resp.ok) {
+          const errorData = await resp.json();
+          throw new Error(errorData?.error || `HTTP ${resp.status}`);
         }
-        return null;
-      })
-      .filter(Boolean);
-
-    console.log(tickets);
-    if(tickets.length == 0) tickets = undefined;
-
-    const botMessage: ChatMessage = {
-      id: `bot-${Date.now()}`,
-      content: response.reply,
-      sender: "bot",
-      timestamp: new Date(),
-      tickets: tickets
-    };
-
-    setMessages(prev => [...prev, botMessage]);
-    setIsLoading(false);
-
-    if (ticketId) {
-      toast({
-        title: "Ticket Created",
-        description: `New support ticket ${ticketId} has been created.`,
-      });
+  
+        const data = await resp.json();
+        console.log("RAG response:", data);
+  
+        // Format sources as URLs for the link renderer
+        const sources = Array.isArray(data.sources)
+          ? data.sources
+              .filter(s => s?.url)
+              .map((s: any, i: number) => `[${i + 1}] ${s.url}`)
+              .join("  ")
+          : "";
+  
+        const final = sources
+          ? `${data.answer || "No answer"}\n\nSources: ${sources}`
+          : (data.answer || "No relevant information found.");
+  
+        const botMessage: ChatMessage = {
+          id: `bot-${Date.now()}`,
+          content: final,
+          sender: "bot",
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, botMessage]);
+      } else {
+        // Regular AI chat
+        const response = await apiService.chatMessage({
+          message: userMessage.content,
+        });
+        const botMessage: ChatMessage = {
+          id: `bot-${Date.now()}`,
+          content: response.reply,
+          sender: "bot",
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, botMessage]);
+      }
+    } catch (e: any) {
+      console.error("Chat error:", e);
+      const botMessage: ChatMessage = {
+        id: `bot-${Date.now()}`,
+        content: `Error: ${e?.message || "Failed to process request"}`,
+        sender: "bot",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, botMessage]);
+    } finally {
+      setIsLoading(false);
     }
   };
-
+  
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -251,6 +234,12 @@ Is there anything else I can help you with today?`,
                       {message.content}
                     </div>
                   )}
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                  {renderMessageContent(message)} {/* Use the helper here */}
+      {message.ticketId && (
+        <Badge variant="secondary" className="mt-2">Ticket: {message.ticketId}</Badge>
+      )}
+                  </div>
                   {message.ticketId && (
                     <div className="mt-2 pt-2 border-t border-muted-foreground/20">
                       <Badge variant="outline" className="text-xs">
@@ -303,6 +292,18 @@ Is there anything else I can help you with today?`,
                 className="flex-1"
                 disabled={isLoading}
               />
+                <Button
+                  variant={answerFromAttachments ? "default" : "outline"}
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setAnswerFromAttachments(v => !v)}
+                  disabled={isLoading}
+                  title="When enabled, the assistant will answer using ticket attachments"
+                >
+                  <Ticket className="h-4 w-4 mr-2" />
+                  Answer from attachments
+                  {answerFromAttachments ? <Badge className="ml-2">ON</Badge> : null}
+                </Button>
               <Button
                 onClick={handleSendMessage}
                 disabled={!input.trim() || isLoading}
