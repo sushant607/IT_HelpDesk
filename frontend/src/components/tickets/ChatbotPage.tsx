@@ -231,14 +231,15 @@ export default function ChatbotPage() {
                     </div>
                   ) : (
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                      {message.content}
+                      {/* {message.content} */}
+                  {renderMessageContent(message)}
+
                     </div>
                   )}
                   <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                  {renderMessageContent(message)} {/* Use the helper here */}
-      {message.ticketId && (
-        <Badge variant="secondary" className="mt-2">Ticket: {message.ticketId}</Badge>
-      )}
+                  {message.ticketId && (
+                    <Badge variant="secondary" className="mt-2">Ticket: {message.ticketId}</Badge>
+                  )}
                   </div>
                   {message.ticketId && (
                     <div className="mt-2 pt-2 border-t border-muted-foreground/20">
