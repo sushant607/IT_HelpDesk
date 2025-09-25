@@ -14,6 +14,7 @@ interface ChatMessage {
   sender: "user" | "bot";
   timestamp: Date;
   ticketId?: string;
+  tickets?: object[];
 }
 
 export default function ChatbotPage() {
@@ -31,23 +32,23 @@ export default function ChatbotPage() {
 
   const detectIntent = (message: string): string => {
     const lowerMessage = message.toLowerCase();
-    
+
     if (lowerMessage.includes("password") && (lowerMessage.includes("reset") || lowerMessage.includes("forgot") || lowerMessage.includes("change"))) {
       return "password_reset";
     }
-    
+
     if (lowerMessage.includes("software") || lowerMessage.includes("install") || lowerMessage.includes("application") || lowerMessage.includes("program")) {
       return "software_issue";
     }
-    
+
     if (lowerMessage.includes("network") || lowerMessage.includes("internet") || lowerMessage.includes("wifi") || lowerMessage.includes("connection")) {
       return "network_issue";
     }
-    
+
     if (lowerMessage.includes("hardware") || lowerMessage.includes("computer") || lowerMessage.includes("laptop") || lowerMessage.includes("printer")) {
       return "hardware_issue";
     }
-    
+
     return "general_issue";
   };
 
@@ -66,7 +67,7 @@ export default function ChatbotPage() {
 If you're still having issues, I can create a ticket for our IT team. Your password reset request has been auto-resolved! ✅`,
           ticketId: `PWD-${Date.now()}`
         };
-      
+
       case "software_issue":
         return {
           content: `I've created a ticket for your software issue. Our IT team will help you with the installation or configuration.
@@ -81,7 +82,7 @@ In the meantime, please:
 Our team will contact you within 24 hours!`,
           ticketId: `SW-${Date.now()}`
         };
-      
+
       case "network_issue":
         return {
           content: `I've created a ticket for your network connectivity issue.
@@ -97,7 +98,7 @@ Quick troubleshooting steps you can try:
 Our network team will investigate and contact you soon!`,
           ticketId: `NET-${Date.now()}`
         };
-      
+
       case "hardware_issue":
         return {
           content: `I've created a ticket for your hardware issue.
@@ -112,7 +113,7 @@ Please provide additional details:
 Our hardware support team will reach out to schedule a diagnostic or replacement if needed.`,
           ticketId: `HW-${Date.now()}`
         };
-      
+
       default:
         return {
           content: `I've created a general support ticket for your request.
@@ -142,15 +143,33 @@ Is there anything else I can help you with today?`,
     setIsLoading(true);
 
     // Simulate AI processing delay
-    const response = await apiService.chatMessage({message: input});
+    const response = await apiService.chatMessage({ message: input });
     console.log(response.reply);
     const ticketId = '';
+    const lines = response.reply.split("\n");
+
+    // Extract ticket info
+    let tickets = lines
+      .map(line => {
+        const match = line.match(/\[ID:\s*([a-f0-9]+)\]/i);
+        if (match) {
+          const id = match[1];
+          const cleanLine = line.replace(/\[ID:.*?\]\s*/, ""); // remove [ID: ...]
+          return { id, text: cleanLine.trim() };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    console.log(tickets);
+    if(tickets.length == 0) tickets = undefined;
 
     const botMessage: ChatMessage = {
       id: `bot-${Date.now()}`,
       content: response.reply,
       sender: "bot",
       timestamp: new Date(),
+      tickets: tickets
     };
 
     setMessages(prev => [...prev, botMessage]);
@@ -188,16 +207,15 @@ Is there anything else I can help you with today?`,
             <Badge variant="secondary" className="ml-auto">Online</Badge>
           </CardTitle>
         </CardHeader>
-        
+
         <CardContent className="flex-1 flex flex-col p-0">
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4 max-h-[60vh]">
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`flex gap-3 ${
-                  message.sender === "user" ? "justify-end" : "justify-start"
-                }`}
+                className={`flex gap-3 ${message.sender === "user" ? "justify-end" : "justify-start"
+                  }`}
               >
                 {message.sender === "bot" && (
                   <Avatar className="w-8 h-8">
@@ -206,17 +224,33 @@ Is there anything else I can help you with today?`,
                     </AvatarFallback>
                   </Avatar>
                 )}
-                
+
                 <div
-                  className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                    message.sender === "user"
+                  className={`max-w-[70%] rounded-lg px-4 py-2 ${message.sender === "user"
                       ? "bg-primary text-primary-foreground ml-auto"
                       : "bg-muted/50"
-                  }`}
+                    }`}
                 >
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                    {message.content}
-                  </div>
+                  {!!message.tickets ? (
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed space-y-1">
+                      {message.tickets.map((ticket: any, idx: number) => (
+                        <div key={ticket.id || idx}>
+                          <a
+                            href={`/dashboard/tickets/${ticket.id}`}
+                            className="text-primary underline hover:text-primary/80"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {ticket.text}
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                      {message.content}
+                    </div>
+                  )}
                   {message.ticketId && (
                     <div className="mt-2 pt-2 border-t border-muted-foreground/20">
                       <Badge variant="outline" className="text-xs">
@@ -226,13 +260,13 @@ Is there anything else I can help you with today?`,
                     </div>
                   )}
                   <div className="text-xs opacity-70 mt-1">
-                    {message.timestamp.toLocaleTimeString([], { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
+                    {message.timestamp.toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit'
                     })}
                   </div>
                 </div>
-                
+
                 {message.sender === "user" && (
                   <Avatar className="w-8 h-8">
                     <AvatarFallback className="bg-secondary">
@@ -242,7 +276,7 @@ Is there anything else I can help you with today?`,
                 )}
               </div>
             ))}
-            
+
             {isLoading && (
               <div className="flex gap-3 justify-start">
                 <Avatar className="w-8 h-8">
@@ -257,7 +291,7 @@ Is there anything else I can help you with today?`,
               </div>
             )}
           </div>
-          
+
           {/* Input Area */}
           <div className="border-t p-4 bg-background/50">
             <div className="flex gap-3">
@@ -277,7 +311,7 @@ Is there anything else I can help you with today?`,
                 <Send className="w-4 h-4" />
               </Button>
             </div>
-            
+
             <div className="flex flex-wrap gap-2 mt-3">
               <Button
                 variant="outline"

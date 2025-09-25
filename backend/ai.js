@@ -407,7 +407,7 @@ const fetchMyTicketsTool = tool(
       const recent = sorted.slice(0, 5);
 
       const ticketLines = recent.map((t, idx) =>
-        `${idx + 1}. "${t.title}" | Priority: ${t.priority} | Status: ${t.status}`
+        `${idx + 1}. [ID: ${t.ticket_id || t._id || 'N/A'}] "${t.title}" | Priority: ${t.priority} | Status: ${t.status}`
       ).join('\n');
 
       const summary = `You have ${tickets.length} ticket(s).\nMost recent tickets:\n${ticketLines}`;
@@ -465,13 +465,20 @@ const fetchTeamTicketsTool = tool(
         return "No tickets found for your team.";
       }
       
-      const byStatus = tickets.reduce((acc, t) => {
-        acc[t.status] = (acc[t.status] || 0) + 1;
-        return acc;
-      }, {});
-      
-      const summary = `Your team has ${tickets.length} ticket(s):\n` +
-        Object.entries(byStatus).map(([status, count]) => `- ${count} ${status}`).join('\n');
+      // Sort tickets by createdAt descending (most recent first)
+      const sorted = [...tickets].sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.created_at || 0);
+        const dateB = new Date(b.createdAt || b.created_at || 0);
+        return dateB - dateA;
+      });
+
+      const recent = sorted.slice(0, 5);
+
+      const ticketLines = recent.map((t, idx) =>
+        `${idx + 1}. "${t.title}" | Priority: ${t.priority} | Status: ${t.status}`
+      ).join('\n');
+
+      const summary = `You have ${tickets.length} ticket(s).\nMost recent tickets:\n${ticketLines}`;
       
       console.log('Team tickets fetched successfully');
       return summary;
