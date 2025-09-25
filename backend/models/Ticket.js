@@ -48,6 +48,20 @@ const TicketSchema = new mongoose.Schema({
     required: true
   },
 
+  reminders: [{
+  setBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  reminderDate: { type: Date, required: true },
+  message: { type: String, default: 'Ticket reminder' },
+  isActive: { type: Boolean, default: true },
+  notificationsSent: {
+    oneDayBefore: { type: Boolean, default: false },
+    fiveHoursBefore: { type: Boolean, default: false },
+    oneHourBefore: { type: Boolean, default: false },
+    oneMinuteBefore: { type: Boolean, default: false }
+  },
+  createdAt: { type: Date, default: Date.now }
+}],
+
   comments: [CommentSchema],
   attachments: [AttachmentSchema],
   createdAt: { type: Date, default: Date.now },

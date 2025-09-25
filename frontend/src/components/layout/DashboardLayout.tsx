@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { AppSidebar } from "./AppSidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 interface UserInfo {
   email: string;
@@ -68,14 +69,14 @@ export default function DashboardLayout() {
           {/* Top Header */}
           <header className="h-16 border-b bg-card/50 backdrop-blur-sm flex items-center justify-between px-6">
             <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" className="lg:hidden">
+              <SidebarTrigger className="hover:bg-muted p-2 rounded-md">
                 <Menu className="w-4 h-4" />
-              </Button>
+              </SidebarTrigger>
               <h1 className="text-lg font-semibold">IT Helpdesk</h1>
             </div>
             
             <div className="flex items-center gap-3">
-              <Button 
+              {/* <Button 
                 variant="ghost" 
                 size="sm" 
                 className="relative"
@@ -83,7 +84,7 @@ export default function DashboardLayout() {
               >
                 <Bell className="w-4 h-4" />
                 <Badge className="absolute -top-1 -right-1 w-2 h-2 p-0 bg-destructive" />
-              </Button>
+              </Button> */}
               
               <div className="flex items-center gap-3">
                 <Avatar className="w-8 h-8">

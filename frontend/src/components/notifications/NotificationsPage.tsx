@@ -22,26 +22,30 @@ export default function NotificationsPage() {
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
   const { toast } = useToast();
 
- useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-       
-        const res = await fetch("http://localhost:5000/api/notifications", {
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${localStorage.getItem("auth_token")}`, 
-          },
-        });
-        const data = await res.json();
-       
-        setNotifications(data);
-      } catch (err) {
-        console.error("Error fetching notifications:", err);
-      }
-    };
+  const onNotificationChange = () => {
+    window.dispatchEvent(new CustomEvent('notificationChanged'));
+  };
 
-    fetchNotifications();
-  }, []);
+  useEffect(() => {
+      const fetchNotifications = async () => {
+        try {
+        
+          const res = await fetch("http://localhost:5000/api/notifications", {
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${localStorage.getItem("auth_token")}`, 
+            },
+          });
+          const data = await res.json();
+        
+          setNotifications(data);
+        } catch (err) {
+          console.error("Error fetching notifications:", err);
+        }
+      };
+
+      fetchNotifications();
+    }, []);
 
   
 
@@ -92,6 +96,7 @@ export default function NotificationsPage() {
           : notification
       )
     );
+    onNotificationChange(); 
     toast({
       title: "Notification marked as read",
       description: "The notification has been marked as read.",
@@ -142,6 +147,7 @@ export default function NotificationsPage() {
     const data = await res.json();
   
     setNotifications(prev => prev.filter(n => n._id !== id));
+    onNotificationChange(); 
     toast({
       title: "Notification deleted",
       description: "The notification has been removed.",

@@ -10,11 +10,11 @@ cloudinary.config({
 });
 
 // Debug Cloudinary config
-console.log('Cloudinary Config Check:', {
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? '✓ Set' : '✗ Missing',
-  api_key: process.env.CLOUDINARY_API_KEY ? '✓ Set' : '✗ Missing',
-  api_secret: process.env.CLOUDINARY_API_SECRET ? '✓ Set' : '✗ Missing'
-});
+// console.log('Cloudinary Config Check:', {
+//   cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? '✓ Set' : '✗ Missing',
+//   api_key: process.env.CLOUDINARY_API_KEY ? '✓ Set' : '✗ Missing',
+//   api_secret: process.env.CLOUDINARY_API_SECRET ? '✓ Set' : '✗ Missing'
+// });
 
 const storage = new CloudinaryStorage({
   cloudinary,

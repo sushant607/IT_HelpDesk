@@ -4,9 +4,25 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, Edit, Eye, Bell } from "lucide-react"; // Added Bell icon
+import { 
+  Plus, 
+  Search, 
+  Filter, 
+  Eye, 
+  Bell, 
+  Calendar, 
+  Clock, 
+  X, 
+  User, 
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  PauseCircle,
+  Tag,
+  Zap
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner"; // Make sure to install: npm install sonner
+import { toast } from "sonner";
 
 interface TicketData {
   id: string;
@@ -33,6 +49,17 @@ interface UserData {
   department: string;
 }
 
+interface ReminderData {
+  _id: string;
+  reminderDate: string;
+  message: string;
+  isActive: boolean;
+  setBy: {
+    _id: string;
+    name: string;
+  };
+}
+
 export default function MyTicketsPage() {
   const [tickets, setTickets] = useState<TicketData[]>([]);
   const [filteredTickets, setFilteredTickets] = useState<TicketData[]>([]);
@@ -41,6 +68,11 @@ export default function MyTicketsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [currentUser, setCurrentUser] = useState<UserData | null>(null);
   const [remindingTickets, setRemindingTickets] = useState<Set<string>>(new Set());
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [selectedTicketForReminder, setSelectedTicketForReminder] = useState<string>('');
+  const [reminderDate, setReminderDate] = useState('');
+  const [reminderMessage, setReminderMessage] = useState('');
+  const [ticketReminders, setTicketReminders] = useState<{[key: string]: ReminderData[]}>({});
   const navigate = useNavigate();
 
   // Get current user data from JWT token
@@ -50,7 +82,6 @@ export default function MyTicketsPage() {
         const token = localStorage.getItem("auth_token") || localStorage.getItem("token");
         if (!token) return;
 
-        // Decode JWT to get user info (since your auth middleware does this server-side)
         const tokenParts = token.split('.');
         if (tokenParts.length !== 3) return;
 
@@ -167,10 +198,8 @@ export default function MyTicketsPage() {
     setFilteredTickets(filtered);
   }, [tickets, searchQuery, statusFilter, categoryFilter]);
 
-  // Check if current user is a manager
   const isManager = currentUser?.role === 'manager';
 
-  // Handle remind functionality (managers only)
   const handleRemindAssignee = async (ticketId: string, ticketTitle: string) => {
     if (!isManager) {
       toast.error('Only managers can send reminders');
@@ -195,12 +224,15 @@ export default function MyTicketsPage() {
         throw new Error(data.msg || 'Failed to send reminder');
       }
 
-      // Show success toast
-      toast.success(`Reminder sent to ${data.assigneeName} for "${data.ticketTitle}"`);
+      toast.success(`Reminder sent to ${data.assigneeName}`, {
+        description: `For ticket: "${data.ticketTitle}"`,
+      });
       
     } catch (error) {
       console.error('Failed to send reminder:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to send reminder');
+      toast.error('Failed to send reminder', {
+        description: error instanceof Error ? error.message : 'Unknown error occurred',
+      });
     } finally {
       setRemindingTickets(prev => {
         const newSet = new Set(prev);
@@ -210,76 +242,209 @@ export default function MyTicketsPage() {
     }
   };
 
+  const handleSetReminder = async (ticketId: string) => {
+    setSelectedTicketForReminder(ticketId);
+    setShowReminderModal(true);
+    setReminderDate('');
+    setReminderMessage('');
+  };
+
+  const submitReminder = async () => {
+    if (!reminderDate || !selectedTicketForReminder) {
+      toast.error('Please select a date and time for the reminder');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/tickets/${selectedTicketForReminder}/reminders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          reminderDate,
+          message: reminderMessage || 'Ticket reminder'
+        })
+      });
+
+      if (response.ok) {
+        toast.success('Reminder set successfully!', {
+          description: 'You will be notified at the specified time',
+        });
+        setShowReminderModal(false);
+        fetchTicketReminders(selectedTicketForReminder);
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Failed to set reminder');
+      }
+    } catch (error) {
+      toast.error('Failed to set reminder');
+      console.error('Error setting reminder:', error);
+    }
+  };
+
+  const fetchTicketReminders = async (ticketId: string) => {
+    try {
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/tickets/${ticketId}/reminders`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        const reminders = await response.json();
+        setTicketReminders(prev => ({
+          ...prev,
+          [ticketId]: reminders
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching reminders:', error);
+    }
+  };
+
+  // Enhanced UI helper functions
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "open":
+        return <AlertCircle className="w-4 h-4" />;
+      case "in-progress":
+        return <Clock className="w-4 h-4" />;
+      case "resolved":
+        return <CheckCircle2 className="w-4 h-4" />;
+      case "closed":
+        return <XCircle className="w-4 h-4" />;
+      default:
+        return <PauseCircle className="w-4 h-4" />;
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "open":
-        return "bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full";
+        return "bg-blue-500 hover:bg-blue-600 text-white";
       case "in-progress":
-        return "bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-full";
+        return "bg-amber-500 hover:bg-amber-600 text-white";
       case "resolved":
-        return "bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-full";
+        return "bg-green-500 hover:bg-green-600 text-white";
       case "closed":
-        return "bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded-full";
+        return "bg-gray-500 hover:bg-gray-600 text-white";
       default:
-        return "bg-muted px-3 py-1 rounded-full";
+        return "bg-muted text-muted-foreground";
+    }
+  };
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case "urgent":
+        return <Zap className="w-4 h-4 text-red-500" />;
+      case "high":
+        return <AlertCircle className="w-4 h-4 text-orange-500" />;
+      case "medium":
+        return <Clock className="w-4 h-4 text-yellow-500" />;
+      case "low":
+        return <PauseCircle className="w-4 h-4 text-green-500" />;
+      default:
+        return <PauseCircle className="w-4 h-4 text-gray-500" />;
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "low":
-        return "border-l-muted";
+        return "border-l-green-400";
       case "medium":
-        return "border-l-primary";
+        return "border-l-yellow-400";
       case "high":
-        return "border-l-warning";
+        return "border-l-orange-400";
       case "urgent":
-        return "border-l-destructive";
+        return "border-l-red-500";
       default:
-        return "border-l-muted";
+        return "border-l-gray-300";
     }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 1) return "Today";
+    if (diffDays === 2) return "Yesterday";
+    if (diffDays <= 7) return `${diffDays - 1} days ago`;
+    
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+    });
   };
 
   const categories = ["Account Access", "Software", "Network", "Hardware", "Email"];
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">My Tickets</h1>
-          <p className="text-muted-foreground">
-            Track and manage your support requests
-            {/* {isManager && <span className="ml-2 text-amber-600 font-medium">(Manager View)</span>} */}
+    <div className="space-y-8 p-6 max-w-7xl mx-auto">
+      {/* Enhanced Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              My Tickets
+            </h1>
+            {isManager && (
+              <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200 px-3 py-1">
+                <User className="w-3 h-3 mr-1" />
+                Manager
+              </Badge>
+            )}
+            {currentUser?.role === 'employee' && (
+              <Badge variant="secondary" className="bg-blue-100 text-blue-800 border-blue-200 px-3 py-1">
+                <User className="w-3 h-3 mr-1" />
+                Employee
+              </Badge>
+            )}
+          </div>
+          <p className="text-muted-foreground text-lg">
+            Track and manage your support requests efficiently
           </p>
         </div>
-        <Button onClick={() => navigate("/tickets/new")} className="bg-gradient-primary hover:shadow-glow transition-all duration-300">
-          <Plus className="w-4 h-4 mr-2" />
-          Create Ticket
+        <Button 
+          onClick={() => navigate("/tickets/new")} 
+          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg hover:shadow-xl transition-all duration-300"
+          size="lg"
+        >
+          <Plus className="w-5 h-5 mr-2" />
+          Create New Ticket
         </Button>
       </div>
 
-      {/* Filters */}
-      <Card>
+      {/* Enhanced Filters */}
+      <Card className="shadow-md border-0 bg-gradient-to-r from-slate-50 to-blue-50">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="w-4 h-4" />
-            Filters
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Filter className="w-5 h-5 text-blue-600" />
+            Filters & Search
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4 flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
               <Input
-                placeholder="Search tickets..."
+                placeholder="Search by title, description, or creator..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
+                className="pl-10 h-11"
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[200px]">
+              <SelectTrigger className="h-11">
                 <SelectValue placeholder="All Status" />
               </SelectTrigger>
               <SelectContent>
@@ -291,7 +456,7 @@ export default function MyTicketsPage() {
               </SelectContent>
             </Select>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-[200px]">
+              <SelectTrigger className="h-11">
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
@@ -307,82 +472,198 @@ export default function MyTicketsPage() {
         </CardContent>
       </Card>
 
-      {/* Debug Info - Remove in production */}
-      {/* {process.env.NODE_ENV === 'development' && (
-        <Card className="bg-gray-50">
-          <CardContent className="p-4">
-            <p className="text-sm">
-              <strong>Debug:</strong> Current user role: {currentUser?.role || 'Loading...'} | 
-              Is Manager: {isManager ? 'Yes' : 'No'} | 
-              User: {currentUser?.name || 'Unknown'}
-            </p>
-          </CardContent>
-        </Card>
-      )} */}
+      {/* Stats Cards for Manager */}
+      {isManager && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-blue-600 font-medium">Total Tickets</p>
+                  <p className="text-2xl font-bold text-blue-900">{tickets.length}</p>
+                </div>
+                <AlertCircle className="w-8 h-8 text-blue-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-amber-50 to-amber-100 border-amber-200">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-amber-600 font-medium">In Progress</p>
+                  <p className="text-2xl font-bold text-amber-900">
+                    {tickets.filter(t => t.status === 'in-progress').length}
+                  </p>
+                </div>
+                <Clock className="w-8 h-8 text-amber-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-red-50 to-red-100 border-red-200">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-red-600 font-medium">Urgent</p>
+                  <p className="text-2xl font-bold text-red-900">
+                    {tickets.filter(t => t.priority === 'urgent').length}
+                  </p>
+                </div>
+                <Zap className="w-8 h-8 text-red-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-green-50 to-green-100 border-green-200">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-green-600 font-medium">Resolved</p>
+                  <p className="text-2xl font-bold text-green-900">
+                    {tickets.filter(t => t.status === 'resolved').length}
+                  </p>
+                </div>
+                <CheckCircle2 className="w-8 h-8 text-green-500" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-      {/* Tickets List */}
+      {/* Enhanced Tickets List */}
       <div className="space-y-4">
         {filteredTickets.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <h3 className="text-lg font-semibold mb-2">No tickets found</h3>
-              <p className="text-muted-foreground">Try adjusting your filters or create a new ticket</p>
+          <Card className="border-2 border-dashed border-gray-200">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <div className="rounded-full bg-gray-100 p-6 mb-4">
+                <Search className="w-12 h-12 text-gray-400" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No tickets found</h3>
+              <p className="text-muted-foreground text-center max-w-md">
+                Try adjusting your filters or create a new ticket to get started
+              </p>
+              <Button 
+                onClick={() => navigate("/tickets/new")} 
+                className="mt-6"
+                variant="outline"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create Your First Ticket
+              </Button>
             </CardContent>
           </Card>
         ) : (
           filteredTickets.map((ticket) => (
-            <Card key={ticket.id} className={`border-l-4 ${getPriorityColor(ticket.priority)}`}>
+            <Card 
+              key={ticket.id} 
+              className={`border-l-4 ${getPriorityColor(ticket.priority)} shadow-md hover:shadow-lg transition-all duration-200 bg-white`}
+            >
               <CardHeader className="pb-3">
                 <div className="flex justify-between items-start">
-                  <div className="space-y-1">
-                    <CardTitle className="text-lg">{ticket.title}</CardTitle>
-                    <CardDescription>
-                      {ticket.createdByName ? `Created by: ${ticket.createdByName}` : ticket.id.substring(0, 8)}
-                    </CardDescription>
+                  <div className="space-y-2 flex-1">
+                    <div className="flex items-start gap-3">
+                      <div className="flex items-center gap-2">
+                        {getPriorityIcon(ticket.priority)}
+                        <CardTitle className="text-xl text-gray-900 leading-tight">
+                          {ticket.title}
+                        </CardTitle>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <User className="w-4 h-4" />
+                        {ticket.createdByName || 'Unknown'}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-4 h-4" />
+                        {formatDate(ticket.createdAt)}
+                      </div>
+                    </div>
                   </div>
-                  <Badge className={getStatusColor(ticket.status)}>
-                    {ticket.status.replace("-", " ").toUpperCase()}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge className={`${getStatusColor(ticket.status)} px-3 py-1 rounded-full flex items-center gap-1`}>
+                      {getStatusIcon(ticket.status)}
+                      {ticket.status.replace("-", " ").toUpperCase()}
+                    </Badge>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">{ticket.description}</p>
-                <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                  <span>Category: {ticket.category}</span>
-                  <span className="flex items-center gap-1">
-                    Priority:
-                    <Badge variant="outline">{ticket.priority}</Badge>
-                  </span>
-                  <span>Created: {new Date(ticket.createdAt).toLocaleDateString()}</span>
-                  <span>Updated: {new Date(ticket.updatedAt).toLocaleDateString()}</span>
+                <p className="text-gray-700 leading-relaxed">{ticket.description}</p>
+                
+                {/* Enhanced Info Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-blue-500" />
+                    <span className="text-sm">
+                      <span className="text-muted-foreground">Category:</span>
+                      <br />
+                      <span className="font-medium">{ticket.category}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {getPriorityIcon(ticket.priority)}
+                    <span className="text-sm">
+                      <span className="text-muted-foreground">Priority:</span>
+                      <br />
+                      <span className="font-medium capitalize">{ticket.priority}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-green-500" />
+                    <span className="text-sm">
+                      <span className="text-muted-foreground">Updated:</span>
+                      <br />
+                      <span className="font-medium">{formatDate(ticket.updatedAt)}</span>
+                    </span>
+                  </div>
                   {ticket.assignedTo && (
-                    <span>Assigned to: {ticket.assignedTo.name}</span>
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-purple-500" />
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Assigned to:</span>
+                        <br />
+                        <span className="font-medium">{ticket.assignedTo.name}</span>
+                      </span>
+                    </div>
                   )}
                 </div>
-                <div className="flex gap-2 justify-end">
-                  {/* Debug info for button visibility */}
-                  {/* {process.env.NODE_ENV === 'development' && (
-                    <span className="text-xs text-gray-500 mr-4">
-                      Show Remind: {isManager && ticket.assignedTo && !['closed', 'resolved'].includes(ticket.status) ? 'Yes' : 'No'}
-                    </span>
-                  )} */}
-                  
-                  {/* Manager Remind Button - only show for managers with assigned tickets that aren't closed/resolved */}
+                
+                {/* Enhanced Action Buttons */}
+                <div className="flex gap-3 justify-end pt-2">
+                  {/* Employee Set Reminder Button */}
+                  {(currentUser?.role === 'employee') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSetReminder(ticket.id)}
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 hover:border-blue-300 transition-colors"
+                    >
+                      <Bell className="w-4 h-4 mr-2" />
+                      Set Reminder
+                    </Button>
+                  )}
+
+                  {/* Manager Remind Button */}
                   {isManager && ticket.assignedTo && !['closed', 'resolved'].includes(ticket.status) && (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleRemindAssignee(ticket.id, ticket.title)}
                       disabled={remindingTickets.has(ticket.id)}
-                      className="hover:bg-amber-50 hover:border-amber-200 text-amber-700 border-amber-200"
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200 hover:border-amber-300 transition-colors"
                     >
                       <Bell className="w-4 h-4 mr-2" />
-                      {remindingTickets.has(ticket.id) ? 'Sending...' : 'Remind'}
+                      {remindingTickets.has(ticket.id) ? 'Sending...' : 'Send Reminder'}
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/tickets/${ticket.id}`)}>
+                  
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => navigate(`/dashboard/tickets/${ticket.id}`)}
+                    className="hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 transition-colors"
+                  >
                     <Eye className="w-4 h-4 mr-2" />
-                    View
+                    View Details
                   </Button>
                 </div>
               </CardContent>
@@ -391,9 +672,99 @@ export default function MyTicketsPage() {
         )}
       </div>
 
-      {filteredTickets.length === 0 ? null : (
-        <div className="text-center text-sm text-muted-foreground">
-          Showing {filteredTickets.length} of {tickets.length} tickets
+      {/* Enhanced Footer */}
+      {filteredTickets.length > 0 && (
+        <Card className="bg-gradient-to-r from-slate-50 to-blue-50 border-0">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <span>
+                Showing <span className="font-semibold text-blue-600">{filteredTickets.length}</span> of{" "}
+                <span className="font-semibold text-blue-600">{tickets.length}</span> tickets
+              </span>
+              <div className="flex items-center gap-4">
+                {isManager && (
+                  <span className="flex items-center gap-2">
+                    <Bell className="w-4 h-4" />
+                    Manager actions available
+                  </span>
+                )}
+                {currentUser?.role === 'employee' && (
+                  <span className="flex items-center gap-2">
+                    <Bell className="w-4 h-4" />
+                    Personal reminders available
+                  </span>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Enhanced Reminder Modal */}
+      {showReminderModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-xl max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 rounded-full">
+                  <Bell className="w-5 h-5 text-blue-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900">Set Personal Reminder</h3>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowReminderModal(false)}
+                className="hover:bg-gray-100 rounded-full"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reminder Date & Time
+                </label>
+                <Input
+                  type="datetime-local"
+                  value={reminderDate}
+                  onChange={(e) => setReminderDate(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
+                  className="w-full h-11"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reminder Message (Optional)
+                </label>
+                <Input
+                  placeholder="Enter reminder message..."
+                  value={reminderMessage}
+                  onChange={(e) => setReminderMessage(e.target.value)}
+                  className="w-full h-11"
+                />
+              </div>
+              
+              <div className="flex gap-3 justify-end pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowReminderModal(false)}
+                  className="px-6"
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={submitReminder}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6"
+                >
+                  <Bell className="w-4 h-4 mr-2" />
+                  Set Reminder
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

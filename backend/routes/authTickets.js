@@ -288,6 +288,204 @@ router.get('/analytics/manager-tags', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/tickets/team-workload - Detailed team workload with advanced features
+router.get('/team-workload', authenticate, async (req, res) => {
+  try {
+    const { 
+      department, 
+      page = 1, 
+      limit = 20, 
+      sortBy = 'workload', 
+      sortOrder = 'desc',
+      filter = 'all',
+      search = ''
+    } = req.query;
+    
+    const dept = department || req.user.department;
+    if (!dept) {
+      return res.status(400).json({ success: false, msg: 'Department required' });
+    }
+
+    // Build user search filter
+    const userSearchFilter = {
+      department: dept,
+      ...(search && {
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } }
+        ]
+      })
+    };
+
+    // Get all users in department with search
+    const users = await User.find(userSearchFilter).select('_id name email role createdAt');
+    
+    if (users.length === 0) {
+      return res.json({ 
+        success: true, 
+        teamMembers: [], 
+        summary: { total: 0, page, totalPages: 0, hasMore: false } 
+      });
+    }
+
+    // Get active tickets for workload calculation
+    const tickets = await Ticket.find({
+      assignedTo: { $in: users.map(u => u._id) }
+    }).populate('assignedTo', 'name email')
+      .populate('createdBy', 'name')
+      .select('_id title status priority assignedTo createdBy createdAt updatedAt tags')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Calculate detailed workload for each team member
+    const detailedWorkload = users.map(user => {
+      const userTickets = tickets.filter(ticket => 
+        ticket.assignedTo && ticket.assignedTo._id.toString() === user._id.toString()
+      );
+
+      const activeTickets = userTickets.filter(t => ['open', 'in-progress'].includes(t.status));
+      const completedTickets = userTickets.filter(t => ['resolved', 'closed'].includes(t.status));
+
+      // Categorize by priority
+      const priorityBreakdown = {
+        urgent: activeTickets.filter(t => t.priority === 'urgent').length,
+        high: activeTickets.filter(t => t.priority === 'high').length,
+        medium: activeTickets.filter(t => t.priority === 'medium').length,
+        low: activeTickets.filter(t => t.priority === 'low').length
+      };
+
+      // Recent activity
+      const recentTickets = userTickets.slice(0, 5).map(ticket => ({
+        _id: ticket._id,
+        title: ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        createdAt: ticket.createdAt,
+        createdBy: ticket.createdBy?.name || 'Unknown'
+      }));
+
+      // Calculate workload score (weighted by priority)
+      const workloadScore = 
+        priorityBreakdown.urgent * 4 + 
+        priorityBreakdown.high * 3 + 
+        priorityBreakdown.medium * 2 + 
+        priorityBreakdown.low * 1;
+
+      return {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        joinedAt: user.createdAt,
+        totalTickets: userTickets.length,
+        activeTickets: activeTickets.length,
+        completedTickets: completedTickets.length,
+        priorityBreakdown,
+        workloadScore,
+        completionRate: userTickets.length > 0 
+          ? ((completedTickets.length / userTickets.length) * 100).toFixed(1)
+          : '0',
+        recentTickets,
+        lastActivity: userTickets[0]?.updatedAt || user.createdAt,
+        avgResponseTime: '2.3h', // This could be calculated from actual data
+        status: activeTickets.length === 0 ? 'available' : 
+               activeTickets.length <= 2 ? 'light' :
+               activeTickets.length <= 5 ? 'medium' : 'heavy'
+      };
+    });
+
+    // Apply filters
+    let filteredMembers = detailedWorkload;
+    if (filter === 'active') {
+      filteredMembers = detailedWorkload.filter(member => member.activeTickets > 0);
+    } else if (filter === 'available') {
+      filteredMembers = detailedWorkload.filter(member => member.activeTickets <= 2);
+    } else if (filter === 'overloaded') {
+      filteredMembers = detailedWorkload.filter(member => member.activeTickets >= 6);
+    } else if (filter === 'light') {
+      filteredMembers = detailedWorkload.filter(member => member.status === 'light');
+    } else if (filter === 'medium') {
+      filteredMembers = detailedWorkload.filter(member => member.status === 'medium');
+    } else if (filter === 'heavy') {
+      filteredMembers = detailedWorkload.filter(member => member.status === 'heavy');
+    }
+
+    // Apply sorting
+    filteredMembers.sort((a, b) => {
+      let aVal, bVal;
+      
+      switch (sortBy) {
+        case 'name':
+          aVal = a.name.toLowerCase();
+          bVal = b.name.toLowerCase();
+          break;
+        case 'workload':
+          aVal = a.activeTickets;
+          bVal = b.activeTickets;
+          break;
+        case 'score':
+          aVal = a.workloadScore;
+          bVal = b.workloadScore;
+          break;
+        case 'completion':
+          aVal = parseFloat(a.completionRate);
+          bVal = parseFloat(b.completionRate);
+          break;
+        case 'activity':
+          aVal = new Date(a.lastActivity);
+          bVal = new Date(b.lastActivity);
+          break;
+        default:
+          aVal = a.activeTickets;
+          bVal = b.activeTickets;
+      }
+
+      if (sortOrder === 'asc') {
+        return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+      } else {
+        return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
+      }
+    });
+
+    // Pagination
+    const totalMembers = filteredMembers.length;
+    const totalPages = Math.ceil(totalMembers / parseInt(limit));
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    const paginatedMembers = filteredMembers.slice(startIndex, startIndex + parseInt(limit));
+
+    // Summary statistics
+    const summary = {
+      total: users.length,
+      filtered: totalMembers,
+      page: parseInt(page),
+      totalPages,
+      hasMore: parseInt(page) < totalPages,
+      department: dept,
+      filters: { sortBy, sortOrder, filter, search },
+      stats: {
+        available: detailedWorkload.filter(m => m.status === 'available').length,
+        light: detailedWorkload.filter(m => m.status === 'light').length,
+        medium: detailedWorkload.filter(m => m.status === 'medium').length,
+        heavy: detailedWorkload.filter(m => m.status === 'heavy').length,
+        totalActiveTickets: detailedWorkload.reduce((sum, m) => sum + m.activeTickets, 0),
+        avgWorkload: detailedWorkload.length > 0 
+          ? (detailedWorkload.reduce((sum, m) => sum + m.activeTickets, 0) / detailedWorkload.length).toFixed(1)
+          : '0'
+      }
+    };
+
+    return res.json({
+      success: true,
+      teamMembers: paginatedMembers,
+      summary
+    });
+
+  } catch (error) {
+    console.error('Detailed team workload error:', error);
+    return res.status(500).json({ success: false, msg: 'Error fetching detailed team workload' });
+  }
+});
+
 // GET /api/tickets/team-workload-summary - Compact team overview
 router.get('/team-workload-summary', authenticate, async (req, res) => {
   try {
@@ -853,6 +1051,160 @@ router.delete('/:id/attachments/:attachmentId', authenticate, async (req, res) =
   } catch (error) {
     console.error('DELETE /tickets/:id/attachments/:attachmentId error:', error);
     return res.status(500).json({ msg: 'Server error while deleting attachment' });
+  }
+});
+
+// POST /api/tickets/:id/reminders - Set reminder for a ticket
+router.post('/:id/reminders', authenticate, async (req, res) => {
+  try {
+    const { reminderDate, message } = req.body;
+    const { id } = req.params;
+
+    // Validate reminder date is in the future
+    if (new Date(reminderDate) <= new Date()) {
+      return res.status(400).json({ error: 'Reminder date must be in the future' });
+    }
+
+    const ticket = await Ticket.findById(id);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Check if user is employee (has access to set reminders)
+    if (req.user.role !== 'employee' && req.user.role !== 'manager') {
+      return res.status(403).json({ error: 'Only employees can set reminders' });
+    }
+
+    // Permission check - user must be able to view the ticket
+    const isCreator = ticket.createdBy && ticket.createdBy.toString() === req.user.id;
+    const isAssignee = ticket.assignedTo && ticket.assignedTo.toString() === req.user.id;
+    const sameDept = ticket.department === req.user.department;
+
+    let canSetReminder = false;
+    if (req.user.role === 'employee') {
+      canSetReminder = isCreator || isAssignee;
+    } else if (req.user.role === 'manager' || req.user.role === 'admin') {
+      canSetReminder = sameDept || isCreator || isAssignee;
+    }
+
+    if (!canSetReminder) {
+      return res.status(403).json({ error: 'Cannot set reminder for this ticket' });
+    }
+
+    const newReminder = {
+      setBy: req.user.id,
+      reminderDate: new Date(reminderDate),
+      message: message || 'Ticket reminder',
+      isActive: true,
+      notificationsSent: {
+        oneDayBefore: false,
+        fiveHoursBefore: false,
+        oneHourBefore: false
+      }
+    };
+
+    ticket.reminders.push(newReminder);
+    await ticket.save();
+
+    res.json({ 
+      message: 'Reminder set successfully', 
+      reminder: newReminder 
+    });
+
+  } catch (error) {
+    console.error('Error setting reminder:', error);
+    res.status(500).json({ error: 'Failed to set reminder' });
+  }
+});
+
+// GET /api/tickets/:id/reminders - Get reminders for a ticket
+router.get('/:id/reminders', authenticate, async (req, res) => {
+  try {
+    const ticket = await Ticket.findById(req.params.id)
+      .populate('reminders.setBy', 'name email');
+    
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Permission check - same as view ticket permissions
+    const isCreator = ticket.createdBy && ticket.createdBy.toString() === req.user.id;
+    const isAssignee = ticket.assignedTo && ticket.assignedTo.toString() === req.user.id;
+    const sameDept = ticket.department === req.user.department;
+
+    let canView = false;
+    if (req.user.role === 'employee') {
+      canView = isCreator || isAssignee;
+    } else if (req.user.role === 'manager' || req.user.role === 'admin') {
+      canView = sameDept || isCreator || isAssignee;
+    }
+
+    if (!canView) {
+      return res.status(403).json({ error: 'Cannot view reminders for this ticket' });
+    }
+
+    res.json(ticket.reminders.filter(r => r.isActive));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch reminders' });
+  }
+});
+
+// DELETE /api/tickets/:ticketId/reminders/:reminderId - Delete reminder
+router.delete('/:ticketId/reminders/:reminderId', authenticate, async (req, res) => {
+  try {
+    const { ticketId, reminderId } = req.params;
+    
+    const ticket = await Ticket.findById(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    const reminder = ticket.reminders.id(reminderId);
+    if (!reminder) {
+      return res.status(404).json({ error: 'Reminder not found' });
+    }
+
+    // Only reminder creator or manager can delete
+    if (reminder.setBy.toString() !== req.user.id && req.user.role !== 'manager') {
+      return res.status(403).json({ error: 'Not authorized to delete this reminder' });
+    }
+
+    reminder.isActive = false;
+    await ticket.save();
+
+    res.json({ message: 'Reminder deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete reminder' });
+  }
+});
+
+// DELETE /api/tickets/:ticketId/reminders/cleanup - Clean up old reminders
+router.delete('/:ticketId/reminders/cleanup', authenticate, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    
+    const ticket = await Ticket.findById(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    // Remove inactive reminders older than 24 hours
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
+    const initialCount = ticket.reminders.length;
+    ticket.reminders = ticket.reminders.filter(reminder => 
+      reminder.isActive || new Date(reminder.createdAt) > oneDayAgo
+    );
+    
+    await ticket.save();
+    const cleanedCount = initialCount - ticket.reminders.length;
+
+    res.json({ 
+      message: `Cleaned up ${cleanedCount} old reminders`,
+      remainingReminders: ticket.reminders.length 
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to cleanup reminders' });
   }
 });
 

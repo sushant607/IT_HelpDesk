@@ -150,7 +150,7 @@ export default function ManagerDashboard() {
     }
   };
 
-  // ✅ COMPACT: Fetch only summary workload data
+  // COMPACT: Fetch only summary workload data
   const fetchWorkloadSummary = async () => {
     if (!userDepartment) return;
     
@@ -275,7 +275,7 @@ export default function ManagerDashboard() {
     return assignedTo.name || 'Assigned';
   };
 
-  // ✅ COMPACT: Team workload card (much smaller)
+  // COMPACT: Team workload card (much smaller)
   const renderCompactWorkloadCard = () => (
     <Card>
       <CardHeader>
@@ -296,7 +296,7 @@ export default function ManagerDashboard() {
           </div>
         ) : workloadSummary?.summary ? (
           <div className="space-y-4">
-            {/* ✅ COMPACT: Distribution Overview */}
+            {/* COMPACT: Distribution Overview */}
             <div className="grid grid-cols-3 gap-2">
               <div className="text-center p-2 bg-green-50 rounded">
                 <div className="text-lg font-bold text-green-700">
@@ -318,13 +318,13 @@ export default function ManagerDashboard() {
               </div>
             </div>
 
-            {/* ✅ COMPACT: Key Stats */}
+            {/* COMPACT: Key Stats */}
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Available: {workloadSummary.summary.availableEmployees}</span>
               <span>Avg: {workloadSummary.summary.avgWorkload} tickets</span>
             </div>
 
-            {/* ✅ COMPACT: Top 3 Busiest (instead of all employees) */}
+            {/* COMPACT: Top 3 Busiest (instead of all employees) */}
             {workloadSummary.topBusy?.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-2">Busiest Team Members</p>
@@ -341,12 +341,12 @@ export default function ManagerDashboard() {
               </div>
             )}
 
-            {/* ✅ COMPACT: Link to detailed view */}
+            {/* COMPACT: Link to detailed view */}
             <Button 
               variant="outline" 
               size="sm" 
               className="w-full"
-              onClick={() => navigate("/team-workload")} // Separate detailed page
+              onClick={() => navigate("/dashboard/team-workload")} // Separate detailed page
             >
               View Detailed Workload
             </Button>
@@ -380,12 +380,12 @@ export default function ManagerDashboard() {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button
+          {/* <Button
             variant="outline"
             onClick={() => navigate("/all-tickets")}
           >
             View All Tickets
-          </Button>
+          </Button> */}
           <Button
             onClick={() => navigate("/tickets/new")}
             className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
@@ -530,7 +530,7 @@ export default function ManagerDashboard() {
           </CardContent>
         </Card>
 
-        {/* ✅ COMPACT: Smart Team Workload */}
+        {/* COMPACT: Smart Team Workload */}
         {renderCompactWorkloadCard()}
       </div>
 
@@ -607,7 +607,7 @@ export default function ManagerDashboard() {
                     <Badge className={getStatusColor(ticket.status)}>
                       {ticket.status.replace("-", " ").toUpperCase()}
                     </Badge>
-                    {/* ✅ FIXED: Navigation URL */}
+                    {/* FIXED: Navigation URL */}
                     <Button
                       size="sm"
                       variant="outline"

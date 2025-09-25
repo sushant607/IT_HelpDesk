@@ -126,5 +126,57 @@ router.post('/remind/:ticketId', auth, async (req, res) => {
   }
 });
 
+// Function to create reminder notifications (used by reminder service)
+const createReminderNotification = async (userId, ticket, reminder, timeframe) => {
+  try {
+    let titleText = '';
+    let messagePrefix = '';
+    
+    switch(timeframe) {
+      case 'overdue':
+        titleText = 'Ticket Reminder - Due Now!';
+        messagePrefix = '⚠️ OVERDUE: ';
+        break;
+      case '1 minute':
+        titleText = 'Ticket Reminder - 1 minute remaining';
+        messagePrefix = '🔔 Final reminder: ';
+        break;
+      case '1 hour':
+        titleText = 'Ticket Reminder - 1 hour remaining';
+        messagePrefix = '⏰ ';
+        break;
+      case '5 hours':
+        titleText = 'Ticket Reminder - 5 hours remaining';  
+        messagePrefix = '📅 ';
+        break;
+      case '1 day':
+        titleText = 'Ticket Reminder - 1 day remaining';
+        messagePrefix = '📌 ';
+        break;
+      default:
+        titleText = `Ticket Reminder - ${timeframe}`;
+        messagePrefix = '';
+    }
 
+    const notification = new Notification({
+      user: userId,
+      title: titleText,
+      message: `${messagePrefix}Reminder for ticket "${ticket.title}": ${reminder.message}`,
+      type: 'self_reminder',
+      ticketId: ticket._id,
+      read: false
+    });
+
+    await notification.save();
+    // console.log(`Reminder notification created for user ${userId}, ticket ${ticket._id}`);
+    return notification;
+  } catch (error) {
+    console.error('Failed to create reminder notification:', error);
+    throw error;
+  }
+};
+
+// Export the function for use by reminder service
 module.exports = router;
+module.exports.createReminderNotification = createReminderNotification;
+
