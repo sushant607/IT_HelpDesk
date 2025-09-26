@@ -155,13 +155,18 @@ export default function EmployeeDashboard() {
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string): string => {
     switch (status) {
-      case "open": return "bg-blue-500 text-white";
-      case "in-progress": return "bg-orange-500 text-white";
-      case "resolved": return "bg-green-500 text-white";
-      case "closed": return "bg-gray-500 text-white";
-      default: return "bg-muted";
+      case 'open':
+        return 'bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full';
+      case 'in-progress':
+        return 'bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-full';
+      case 'resolved':
+        return 'bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-full';
+      case 'closed':
+        return 'bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded-full';
+      default:
+        return 'bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1 rounded-full';
     }
   };
 

@@ -6,6 +6,7 @@ const { HuggingFaceTransformersEmbeddings } = require('@langchain/community/embe
 const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
 const getCollection = require('../config/Chroma');
 const parser = require("../upload");
+const { log } = require('console');
 
 // Existing upload route (keep as-is)
 router.post("/", parser.single("file"), (req, res) => {
@@ -164,7 +165,7 @@ let EMB;
 function getEmbeddings() {
   if (!EMB) {
     EMB = new HuggingFaceTransformersEmbeddings({ 
-      model: 'Xenova/all-mpnet-base-v2',
+      model: 'Xenova/all-MiniLM-L6-v2',
       // You could also try: 'Xenova/all-mpnet-base-v2' for better quality (but slower)
     });
   }
@@ -196,7 +197,8 @@ async function ensureUserIndex({ tickets, userId, project, size = 600, overlap =
       const a = attachments[ai];
       const url = typeof a === 'string' ? a : a?.url;
       const filename = typeof a === 'string' ? undefined : a?.filename;
-      
+      console.log("here");
+      console.log(a);
       if (!url || seen.has(url)) continue;
       seen.add(url);
       

@@ -232,15 +232,21 @@ export default function ManagerDashboard() {
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string): string => {
     switch (status) {
-      case "open": return "bg-blue-500 text-white";
-      case "in-progress": return "bg-orange-500 text-white";
-      case "resolved": return "bg-green-500 text-white";
-      case "closed": return "bg-gray-500 text-white";
-      default: return "bg-muted";
+      case 'open':
+        return 'bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full';
+      case 'in-progress':
+        return 'bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-full'; // ✅ FIXED
+      case 'resolved':
+        return 'bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-full';
+      case 'closed':
+        return 'bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded-full'; // ✅ FIXED
+      default:
+        return 'bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1 rounded-full';
     }
   };
+
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -558,13 +564,13 @@ export default function ManagerDashboard() {
           {loadingTickets ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <span className="ml-2 text-sm text-muted-foreground">Loading tickets...</span>
+              <span className="ml-2 text-sm text-gray-600">Loading tickets...</span>
             </div>
           ) : tickets.length === 0 ? (
             <div className="text-center py-8">
               <Ticket className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-lg font-medium text-muted-foreground">No tickets yet</p>
-              <p className="text-sm text-muted-foreground mb-4">Department tickets will appear here</p>
+              <p className="text-lg font-medium text-gray-700">No tickets yet</p>
+              <p className="text-sm text-gray-500 mb-4">Department tickets will appear here</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -577,7 +583,7 @@ export default function ManagerDashboard() {
                     {getStatusIcon(ticket.status)}
                     <div className="space-y-1 flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="font-medium">{ticket.title}</p>
+                        <p className="font-medium text-gray-900">{ticket.title}</p>
                         {ticket.createdBy?._id === userId && (
                           <Badge variant="outline" className="text-xs">
                             Created by me
@@ -594,12 +600,8 @@ export default function ManagerDashboard() {
                             {tag}
                           </Badge>
                         ))}
-                        <span className="text-xs text-muted-foreground">
-                          Assigned: {getAssigneeName(ticket.assignedTo)}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(ticket.createdAt).toLocaleDateString()}
-                        </span>
+                        <span className="text-xs text-gray-600">Assigned: {getAssigneeName(ticket.assignedTo)}</span>
+                        <span className="text-xs text-gray-600">{new Date(ticket.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
                   </div>
