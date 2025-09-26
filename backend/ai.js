@@ -298,113 +298,400 @@ const connectGmailTool = tool(
   }
 );
 
-// Tool: Fetch gmail mails (fetches recent mails)
+
+// Tool: Fetch gmail mails (improved structure and filtering)
 const fetchGmailTool = tool(
   async (input, config) => {
     const req = config?.configurable?.req;
     if (!req) throw new Error('Request context missing');
-    const r = await fetch('http://localhost:5000/api/gmail/fetch', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        Authorization: req.headers.authorization || '' 
-      },
-      body: JSON.stringify({
-        limit: input?.limit ?? 20,
+    
+    try {
+      console.log('📧 Fetching Gmail messages...');
+      
+      const requestBody = {
+        limit: Math.min(input?.limit ?? 5, 5), // Cap at 10 as requested
         windowDays: input?.windowDays ?? 7,
-        unreadOnly: input?.unreadOnly ?? true,
+        unreadOnly: input?.unreadOnly ?? false, // Changed default to false for better results
         forceBootstrap: input?.forceBootstrap ?? false
-      })
-    });
-    const json = await r.json();
-    if (!r.ok) throw new Error(JSON.stringify(json));
-    return json;
-  },
-  {
-    name: 'fetchGmail',
-    description: 'Fetch recent Gmail messages as structured candidates via server-side integration.',
-    schema: z.object({
-      limit: z.number().min(1).max(50).optional(),
-      windowDays: z.number().min(1).max(30).optional(),
-      unreadOnly: z.boolean().optional(),
-      forceBootstrap: z.boolean().optional()
-    })
-  }
-);
-
-// Tool: Create tickets for mails with keyword "TICKET" in subject
-const createTicketsFromGmailTool = tool(
-  async (input, config) => {
-    const req = config?.configurable?.req;
-    if (!req) throw new Error('Request context missing');
-
-    // 1. Fetch mails
-    const fetchResp = await fetch('http://localhost:5000/api/gmail/fetch', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        Authorization: req.headers.authorization || '' 
-      },
-      body: JSON.stringify({
-        limit: input?.limit ?? 20,
-        windowDays: input?.windowDays ?? 7,
-        unreadOnly: input?.unreadOnly ?? true,
-        forceBootstrap: input?.forceBootstrap ?? false
-      })
-    });
-    if (!fetchResp.ok) {
-      const errText = await fetchResp.text();
-      throw new Error(errText);
-    }
-    const fetchJson = await fetchResp.json();
-
-    // 2. Filter mails where subject contains "TICKET" (case insensitive)
-    const filtered = (fetchJson.candidates || []).filter(c => 
-      c.title && c.title.toLowerCase().includes('ticket')
-    );
-
-    // 3. Create tickets for each filtered mail
-    const created = [];
-    for (const mail of filtered) {
-      const ticketBody = {
-        title: mail.title || 'Email ticket',
-        description: mail.description || '',
-        priority: input?.priority || 'medium',
-        department: input?.department,
-        assignedTo: input?.assignedTo
       };
-      const ticketResp = await fetch('http://localhost:5000/api/tickets', {
+
+      const r = await fetch('http://localhost:5000/api/gmail/fetch', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
           Authorization: req.headers.authorization || '' 
         },
-        body: JSON.stringify(ticketBody)
+        body: JSON.stringify(requestBody)
       });
-      const ticketJson = await ticketResp.json();
-      if (!ticketResp.ok) {
-        throw new Error(JSON.stringify(ticketJson));
-      }
-      created.push(ticketJson);
-    }
 
-    return JSON.stringify({
-      total: filtered.length,
-      created: created.length,
-      tickets: created
-    });
+      if (!r.ok) {
+        const errorText = await r.text();
+        throw new Error(`Gmail fetch failed: ${r.status} - ${errorText}`);
+      }
+
+      const json = await r.json();
+      const candidates = json.candidates || [];
+
+      if (candidates.length === 0) {
+        return "No emails found in your Gmail inbox for the specified criteria.";
+      }
+
+      // Enhanced filtering for "TICKET" keyword (case-insensitive, multiple variations)
+      const ticketKeywords = ['ticket', 'TICKET', 'Ticket', 'support', 'SUPPORT', 'Support', 'issue', 'ISSUE', 'Issue'];
+      const ticketEmails = candidates.filter(email => {
+        if (!email.title && !email.subject) return false;
+        
+        const subject = (email.title || email.subject || '').toLowerCase();
+        const body = (email.description || email.body || '').toLowerCase();
+        
+        // Check if any ticket keyword exists in subject or body
+        return ticketKeywords.some(keyword => 
+          subject.includes(keyword.toLowerCase()) || 
+          body.includes(keyword.toLowerCase())
+        );
+      });
+
+      // Structure the response for better readability
+      const formatEmails = (emails, title) => {
+        if (emails.length === 0) return '';
+        
+        const formatted = emails.slice(0, 10).map((email, index) => {
+          const sender = email.sender || email.from || 'Unknown Sender';
+          const subject = email.title || email.subject || 'No Subject';
+          const date = email.date ? new Date(email.date).toLocaleDateString() : 'No Date';
+          const snippet = (email.description || email.body || '').substring(0, 100) + '...';
+          
+          return `${index + 1}. **From:** ${sender}
+   **Subject:** ${subject}
+   **Date:** ${date}
+   **Preview:** ${snippet}
+   **ID:** ${email.id || 'N/A'}`;
+        }).join('\n\n');
+
+        return `## ${title} (${emails.length})\n\n${formatted}`;
+      };
+
+      let response = '';
+      
+      if (input?.ticketsOnly) {
+        response = formatEmails(ticketEmails, 'Ticket-Related Emails');
+        if (ticketEmails.length === 0) {
+          response = "No ticket-related emails found. Emails are filtered by keywords: 'ticket', 'support', 'issue' in subject or body.";
+        }
+      } else {
+        // Show all emails first, then ticket-related ones
+        response = formatEmails(candidates, 'Recent Emails');
+        
+        if (ticketEmails.length > 0) {
+          response += '\n\n---\n\n' + formatEmails(ticketEmails, 'Ticket-Related Emails Found');
+          response += '\n\n💡 **Tip:** You can create tickets from these emails using the create tickets tool.';
+        }
+      }
+
+      console.log(`📧 Successfully fetched ${candidates.length} emails, ${ticketEmails.length} ticket-related`);
+      return response;
+
+    } catch (error) {
+      console.error('Gmail fetch error:', error);
+      throw new Error(`Failed to fetch Gmail: ${error.message}`);
+    }
+  },
+  {
+    name: 'fetchGmail',
+    description: 'Fetch recent Gmail messages in a structured format showing sender and subject. Automatically identifies ticket-related emails.',
+    schema: z.object({
+      limit: z.number().min(1).max(10).optional().describe('Number of emails to fetch (max 10, default 10)'),
+      windowDays: z.number().min(1).max(30).optional().describe('Days back to search (default 7)'),
+      unreadOnly: z.boolean().optional().describe('Only unread emails (default false)'),
+      ticketsOnly: z.boolean().optional().describe('Only show ticket-related emails (default false)'),
+      forceBootstrap: z.boolean().optional().describe('Force refresh from Gmail API (default false)')
+    })
+  }
+);
+
+// Enhanced helper function for better email parsing
+function parseEmailForTicket(email) {
+  const subject = email.title || email.subject || '';
+  const body = email.description || email.body || '';
+  const sender = email.sender || email.from || '';
+  
+  // Enhanced parsing logic
+  let title = subject.replace(/^(re:|fwd?:|ticket:|support:|issue:)/i, '').trim();
+  if (!title) {
+    title = 'Email Support Request';
+  }
+  
+  // Limit title length
+  if (title.length > 100) {
+    title = title.substring(0, 97) + '...';
+  }
+  
+  // Create comprehensive description
+  let description = '';
+  
+  if (sender) {
+    description += `**From:** ${sender}\n`;
+  }
+  
+  if (subject && subject !== title) {
+    description += `**Original Subject:** ${subject}\n`;
+  }
+  
+  if (email.date) {
+    description += `**Date:** ${new Date(email.date).toLocaleString()}\n`;
+  }
+  
+  description += '\n**Email Content:**\n';
+  
+  if (body) {
+    // Clean up HTML and format body
+    let cleanBody = body
+      .replace(/<[^>]*>/g, '') // Remove HTML tags
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    // Limit description length
+    if (cleanBody.length > 1500) {
+      cleanBody = cleanBody.substring(0, 1497) + '...';
+    }
+    
+    description += cleanBody;
+  } else {
+    description += '[No email content available]';
+  }
+  
+  // Determine priority based on email content
+  const urgentKeywords = ['urgent', 'emergency', 'critical', 'asap', 'immediately', 'down', 'outage', 'broken'];
+  const highKeywords = ['important', 'priority', 'needed', 'required', 'problem', 'issue', 'error', 'failed'];
+  
+  const contentLower = (subject + ' ' + body).toLowerCase();
+  let priority = 'medium';
+  
+  if (urgentKeywords.some(keyword => contentLower.includes(keyword))) {
+    priority = 'urgent';
+  } else if (highKeywords.some(keyword => contentLower.includes(keyword))) {
+    priority = 'high';
+  }
+  
+  // Determine department based on content
+  const departmentKeywords = {
+    'network team': ['network', 'wifi', 'ethernet', 'connection', 'internet', 'vpn', 'firewall'],
+    'database team': ['database', 'sql', 'mysql', 'postgres', 'db', 'query', 'backup'],
+    'infrastructure team': ['server', 'cloud', 'aws', 'deployment', 'hosting', 'infrastructure'],
+    'hardware team': ['hardware', 'computer', 'laptop', 'printer', 'monitor', 'keyboard', 'mouse'],
+    'software team': ['software', 'application', 'app', 'code', 'bug', 'development', 'programming'],
+    'support team A': ['login', 'password', 'access', 'account', 'user', 'permission', 'authentication']
+  };
+  
+  let department = 'support team A'; // default
+  
+  for (const [dept, keywords] of Object.entries(departmentKeywords)) {
+    if (keywords.some(keyword => contentLower.includes(keyword))) {
+      department = dept;
+      break;
+    }
+  }
+  
+  return {
+    title,
+    description,
+    priority,
+    department,
+    tags: ['Email'], // Add email tag
+    originalEmail: {
+      id: email.id,
+      sender,
+      subject,
+      date: email.date
+    }
+  };
+}
+
+// Tool: Create tickets from Gmail with improved filtering and parsing
+const createTicketsFromGmailTool = tool(
+  async (input, config) => {
+    const req = config?.configurable?.req;
+    if (!req) throw new Error('Request context missing');
+
+    try {
+      console.log('🎫 Creating tickets from Gmail...');
+
+      // 1. Fetch emails with expanded parameters
+      const fetchBody = {
+        limit: Math.min(input?.limit ?? 20, 50), // Allow more for filtering
+        windowDays: input?.windowDays ?? 7,
+        unreadOnly: input?.unreadOnly ?? false, // Changed default for better results
+        forceBootstrap: input?.forceBootstrap ?? false
+      };
+
+      const fetchResp = await fetch('http://localhost:5000/api/gmail/fetch', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          Authorization: req.headers.authorization || '' 
+        },
+        body: JSON.stringify(fetchBody)
+      });
+
+      if (!fetchResp.ok) {
+        const errText = await fetchResp.text();
+        throw new Error(`Gmail fetch failed: ${fetchResp.status} - ${errText}`);
+      }
+
+      const fetchJson = await fetchResp.json();
+      const allEmails = fetchJson.candidates || [];
+
+      if (allEmails.length === 0) {
+        return 'No emails found to process for ticket creation.';
+      }
+
+      // 2. Enhanced filtering for ticket-worthy emails
+      const ticketKeywords = [
+        'ticket', 'support', 'issue', 'problem', 'help', 'error', 
+        'bug', 'broken', 'not working', 'failed', 'urgent', 'request'
+      ];
+
+      const ticketWorthyEmails = allEmails.filter(email => {
+        const subject = (email.title || email.subject || '').toLowerCase();
+        const body = (email.description || email.body || '').toLowerCase();
+        const content = subject + ' ' + body;
+        
+        // Must contain at least one ticket keyword
+        const hasTicketKeyword = ticketKeywords.some(keyword => 
+          content.includes(keyword.toLowerCase())
+        );
+        
+        // Additional filters
+        const isNotAutoReply = !content.includes('auto-reply') && 
+                               !content.includes('out of office') &&
+                               !content.includes('vacation');
+        
+        const hasMinimumContent = content.length > 20;
+        
+        return hasTicketKeyword && isNotAutoReply && hasMinimumContent;
+      });
+
+      console.log(`📧 Found ${ticketWorthyEmails.length} ticket-worthy emails out of ${allEmails.length} total`);
+
+      if (ticketWorthyEmails.length === 0) {
+        return `Analyzed ${allEmails.length} emails but found none that appear to be ticket requests. 
+Looking for keywords: ${ticketKeywords.join(', ')}
+Try checking if emails contain support-related terms in subject or body.`;
+      }
+
+      // 3. Create tickets with enhanced error handling
+      const results = {
+        total: ticketWorthyEmails.length,
+        successful: [],
+        failed: [],
+        details: []
+      };
+
+      for (const email of ticketWorthyEmails.slice(0, 10)) { // Limit to 10 tickets max
+        try {
+          const ticketData = parseEmailForTicket(email);
+          
+          // Add user-specified overrides
+          if (input?.priority && ['low', 'medium', 'high', 'urgent'].includes(input.priority)) {
+            ticketData.priority = input.priority;
+          }
+          if (input?.department) {
+            ticketData.department = input.department;
+          }
+          if (input?.assignedTo) {
+            ticketData.assignedTo = input.assignedTo;
+          }
+
+          console.log(`Creating ticket for email: ${ticketData.title}`);
+
+          const ticketResp = await fetch('http://localhost:5000/api/tickets', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json', 
+              Authorization: req.headers.authorization || '' 
+            },
+            body: JSON.stringify(ticketData)
+          });
+
+          const ticketJson = await ticketResp.json();
+
+          if (ticketResp.ok) {
+            results.successful.push({
+              ticketId: ticketJson.ticket_id || ticketJson._id,
+              title: ticketData.title,
+              emailSender: ticketData.originalEmail.sender,
+              priority: ticketData.priority,
+              department: ticketData.department
+            });
+          } else {
+            throw new Error(ticketJson.message || ticketJson.error || 'Unknown ticket creation error');
+          }
+
+        } catch (error) {
+          console.error(`Failed to create ticket for email ${email.id}:`, error.message);
+          results.failed.push({
+            emailId: email.id,
+            sender: email.sender || email.from,
+            subject: email.title || email.subject,
+            error: error.message
+          });
+        }
+      }
+
+      // 4. Format comprehensive response
+      let response = `## 📧 Gmail Ticket Creation Results\n\n`;
+      response += `**Processed:** ${results.total} ticket-worthy emails\n`;
+      response += `**Successfully Created:** ${results.successful.length} tickets\n`;
+      response += `**Failed:** ${results.failed.length} tickets\n\n`;
+
+      if (results.successful.length > 0) {
+        response += `### ✅ Successfully Created Tickets:\n`;
+        results.successful.forEach((ticket, index) => {
+          response += `${index + 1}. **ID:** ${ticket.ticketId}\n`;
+          response += `   **Title:** ${ticket.title}\n`;
+          response += `   **From:** ${ticket.emailSender}\n`;
+          response += `   **Priority:** ${ticket.priority} | **Department:** ${ticket.department}\n\n`;
+        });
+      }
+
+      if (results.failed.length > 0) {
+        response += `### ❌ Failed Ticket Creation:\n`;
+        results.failed.forEach((failed, index) => {
+          response += `${index + 1}. **Email:** ${failed.subject}\n`;
+          response += `   **From:** ${failed.sender}\n`;
+          response += `   **Error:** ${failed.error}\n\n`;
+        });
+      }
+
+      if (results.successful.length === 0 && results.failed.length > 0) {
+        response += `\n💡 **Troubleshooting Tips:**\n`;
+        response += `- Ensure emails contain clear problem descriptions\n`;
+        response += `- Check if ticket creation permissions are properly set\n`;
+        response += `- Verify department assignments are valid\n`;
+      }
+
+      return response;
+
+    } catch (error) {
+      console.error('Gmail ticket creation error:', error);
+      throw new Error(`Failed to create tickets from Gmail: ${error.message}`);
+    }
   },
   {
     name: 'createTicketsFromGmail',
-    description: 'Fetch Gmail mails containing "TICKET" in subject and create tickets.',
+    description: 'Fetch Gmail emails and automatically create tickets from support-related messages. Uses intelligent filtering and parsing.',
     schema: z.object({
-      limit: z.number().min(1).max(50).optional(),
-      windowDays: z.number().min(1).max(30).optional(),
-      unreadOnly: z.boolean().optional(),
-      forceBootstrap: z.boolean().optional(),
-      priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
-      department: z.enum(['support team A', 'software team', 'network team', 'infrastructure team', 'hardware team', 'database team']).optional(),
-      assignedTo: z.string().optional()
+      limit: z.number().min(1).max(50).optional().describe('Max emails to analyze (default 20)'),
+      windowDays: z.number().min(1).max(30).optional().describe('Days back to search (default 7)'),
+      unreadOnly: z.boolean().optional().describe('Only process unread emails (default false)'),
+      forceBootstrap: z.boolean().optional().describe('Force refresh from Gmail (default false)'),
+      priority: z.enum(['low', 'medium', 'high', 'urgent']).optional().describe('Override priority for all tickets'),
+      department: z.enum(['support team A', 'software team', 'network team', 'infrastructure team', 'hardware team', 'database team']).optional().describe('Override department for all tickets'),
+      assignedTo: z.string().optional().describe('Assign all tickets to specific user ID (manager/admin only)')
     })
   }
 );
