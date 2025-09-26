@@ -358,25 +358,43 @@ router.get('/team-workload', authenticate, async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Department required' });
     }
 
-    // Build user search filter
+    // Build user search filter - ONLY EMPLOYEES, NOT MANAGERS
     const userSearchFilter = {
       department: dept,
-      ...(search && {
+      role: 'employee', // ADD THIS LINE - Only show employees
+      ...search && {
         $or: [
           { name: { $regex: search, $options: 'i' } },
           { email: { $regex: search, $options: 'i' } }
         ]
-      })
+      }
     };
 
-    // Get all users in department with search
-    const users = await User.find(userSearchFilter).select('_id name email role createdAt');
+    // Get all users in department with search (employees only)
+    const users = await User.find(userSearchFilter)
+      .select('id name email role createdAt');
     
     if (users.length === 0) {
-      return res.json({ 
-        success: true, 
-        teamMembers: [], 
-        summary: { total: 0, page, totalPages: 0, hasMore: false } 
+      return res.json({
+        success: true,
+        teamMembers: [],
+        summary: { 
+          total: 0, 
+          filtered: 0,
+          page, 
+          totalPages: 0, 
+          hasMore: false,
+          department: dept,
+          filters: { sortBy, sortOrder, filter, search },
+          stats: {
+            available: 0,
+            light: 0, 
+            medium: 0,
+            heavy: 0,
+            totalActiveTickets: 0,
+            avgWorkload: '0'
+          }
+        }
       });
     }
 
