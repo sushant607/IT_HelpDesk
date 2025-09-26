@@ -144,12 +144,32 @@ export default function ChatbotPage() {
         const response = await apiService.chatMessage({
           message: userMessage.content,
         });
+        
+        const lines = response.reply.split("\n");
+        
+        // Extract ticket info
+        let tickets = lines
+        .map(line => {
+          const match = line.match(/\[ID:\s*([a-f0-9]+)\]/i);
+          if (match) {
+            const id = match[1];
+            const cleanLine = line.replace(/\[ID:.*?\]\s*/, ""); // remove [ID: ...]
+            return { id, text: cleanLine.trim() };
+          }
+          return null;
+        })
+        .filter(Boolean);
+        
+        console.log(tickets);
+        if(tickets.length == 0) tickets = undefined;
         const botMessage: ChatMessage = {
           id: `bot-${Date.now()}`,
           content: response.reply,
           sender: "bot",
           timestamp: new Date(),
+          tickets: tickets
         };
+        
         setMessages(prev => [...prev, botMessage]);
       }
     } catch (e: any) {
