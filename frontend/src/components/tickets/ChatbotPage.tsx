@@ -18,6 +18,14 @@ interface ChatMessage {
   isStreaming?: boolean;
 }
 
+interface ParsedSection {
+  type: 'text' | 'heading' | 'code' | 'list' | 'numbered-list';
+  content: string;
+  level?: number;
+  language?: string;
+  items?: string[];
+}
+
 export default function ModernChatbotPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -58,10 +66,9 @@ export default function ModernChatbotPage() {
   }, [input]);
 
   // Enhanced response parser with better markdown support
-  const parseMarkdown = (content: string) => {
-    const sections = [];
-    let currentSection = { type: 'text', content: '' };
-
+  const parseMarkdown = (content: string): ParsedSection[] => {
+    const sections: ParsedSection[] = [];
+    let currentSection: ParsedSection = { type: 'text', content: '' };
     const lines = content.split('\n');
     let inCodeBlock = false;
     let codeContent = '';
@@ -116,13 +123,13 @@ export default function ModernChatbotPage() {
           if (currentSection.content.trim()) sections.push({ ...currentSection });
           currentSection = { type: 'list', content: '', items: [] };
         }
-        currentSection.items.push(line.replace(/^[-*] /, ''));
+        currentSection.items!.push(line.replace(/^[-*] /, ''));
       } else if (line.match(/^\d+\. /)) {
         if (currentSection.type !== 'numbered-list') {
           if (currentSection.content.trim()) sections.push({ ...currentSection });
           currentSection = { type: 'numbered-list', content: '', items: [] };
         }
-        currentSection.items.push(line.replace(/^\d+\. /, ''));
+        currentSection.items!.push(line.replace(/^\d+\. /, ''));
       } else {
         if (currentSection.type === 'list' || currentSection.type === 'numbered-list') {
           sections.push({ ...currentSection });
@@ -252,7 +259,7 @@ export default function ModernChatbotPage() {
                 3: "text-base font-medium text-gray-700 dark:text-gray-300 mb-2"
               };
               return (
-                <HeadingTag key={index} className={headingClasses[section.level] || headingClasses[3]}>
+                <HeadingTag key={index} className={headingClasses[section.level as keyof typeof headingClasses]}>
                   {section.content}
                 </HeadingTag>
               );
@@ -289,7 +296,7 @@ export default function ModernChatbotPage() {
             case 'list':
               return (
                 <ul key={index} className="space-y-2 my-3">
-                  {section.items.map((item, itemIndex) => (
+                  {section.items?.map((item, itemIndex) => (
                     <li key={itemIndex} className="flex items-start gap-3">
                       <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2.5 flex-shrink-0" />
                       <span className="leading-relaxed">
@@ -303,7 +310,7 @@ export default function ModernChatbotPage() {
             case 'numbered-list':
               return (
                 <ol key={index} className="space-y-2 my-3">
-                  {section.items.map((item, itemIndex) => (
+                  {section.items?.map((item, itemIndex) => (
                     <li key={itemIndex} className="flex items-start gap-3">
                       <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 text-xs font-medium flex items-center justify-center mt-1">
                         {itemIndex + 1}
@@ -337,7 +344,6 @@ export default function ModernChatbotPage() {
       setTimeout(() => setCopiedMessageId(null), 2000);
     } catch (err) {
       toast({ description: "Failed to copy message", variant: "destructive", duration: 2000});
-      toast({ description: "Failed to copy", variant: "destructive" });
     }
   };
 
@@ -393,6 +399,7 @@ export default function ModernChatbotPage() {
 
     try {
       if (answerFromAttachments) {
+        // console.log("RAG mode enabled");
         const token = localStorage.getItem('auth_token');
         
         const resp = await fetch('http://localhost:5000/api/upload/tickets/me/rag/query', {
@@ -416,7 +423,8 @@ export default function ModernChatbotPage() {
         }
 
         const data = await resp.json();
-        
+        // console.log("RAG response:", data);
+  
         const sources = Array.isArray(data.sources)
           ? data.sources
               .filter(s => s?.url)
