@@ -51,6 +51,7 @@ export default function DashboardLayout() {
     toast({
       title: "Logged out successfully",
       description: "See you next time!",
+      duration: 2000
     });
     
     navigate("/login");

@@ -264,7 +264,7 @@ export default function ChatbotPage() {
                         className="h-6 px-2"
                         onClick={() => {
                           navigator.clipboard.writeText(section.content);
-                          toast({ description: "Code copied to clipboard!" });
+                          toast({ description: "Code copied to clipboard!", duration: 2000});
                         }}
                       >
                         <Copy className="w-3 h-3" />
@@ -326,10 +326,10 @@ export default function ChatbotPage() {
     try {
       await navigator.clipboard.writeText(content);
       setCopiedMessageId(messageId);
-      toast({ description: "Message copied to clipboard!" });
+      toast({ description: "Message copied to clipboard!", duration: 2000});
       setTimeout(() => setCopiedMessageId(null), 2000);
     } catch (err) {
-      toast({ description: "Failed to copy message", variant: "destructive" });
+      toast({ description: "Failed to copy message", variant: "destructive", duration: 2000});
     }
   };
 
@@ -348,7 +348,7 @@ export default function ChatbotPage() {
   
     try {
       if (answerFromAttachments) {
-        console.log("RAG mode enabled");
+        // console.log("RAG mode enabled");
         const token = localStorage.getItem('auth_token');
         
         const resp = await fetch('http://localhost:5000/api/upload/tickets/me/rag/query', {
@@ -372,7 +372,7 @@ export default function ChatbotPage() {
         }
   
         const data = await resp.json();
-        console.log("RAG response:", data);
+        // console.log("RAG response:", data);
   
         const sources = Array.isArray(data.sources)
           ? data.sources
@@ -412,7 +412,7 @@ export default function ChatbotPage() {
         })
         .filter(Boolean);
         
-        console.log(tickets);
+        // console.log(tickets);
         if(tickets.length == 0) tickets = undefined;
         const botMessage: ChatMessage = {
           id: `bot-${Date.now()}`,

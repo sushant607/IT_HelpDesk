@@ -178,6 +178,7 @@ export default function SignupPage() {
         toast({
           title: "Account created successfully",
           description: `Welcome to IT Helpdesk, ${response.user.name}!`,
+          duration: 2000
         });
 
         navigate('/dashboard');

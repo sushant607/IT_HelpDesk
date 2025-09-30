@@ -131,6 +131,7 @@ export default function LoginPage() {
         toast({
           title: "Login successful",
           description: `Welcome back, ${response.user.name}!`,
+          duration: 2000
         });
 
         navigate('/dashboard');

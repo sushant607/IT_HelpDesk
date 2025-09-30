@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Users, Ticket, TrendingUp, AlertCircle, Tag, Hash, BarChart3, Clock, CheckCircle, XCircle, User, Edit, Eye, Building2 } from "lucide-react";
+import { Plus, Users, Ticket, TrendingUp, AlertCircle, Tag, Hash, BarChart3, Clock, CheckCircle, XCircle, User, Edit, Eye, Building2, Calendar } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 interface TicketData {
@@ -10,7 +10,7 @@ interface TicketData {
   title: string;
   description: string;
   department: string;
-  status: "open" | "in-progress" | "resolved" | "closed";
+  status: "open" | "in_progress" | "resolved" | "closed";
   priority: "low" | "medium" | "high" | "urgent";
   tags?: string[];
   assignedTo?: { _id: string; name: string; email: string } | string | null;
@@ -166,7 +166,7 @@ export default function ManagerDashboard() {
       if (response.ok) {
         const data = await response.json();
         setWorkloadSummary(data);
-        console.log('Workload summary:', data);
+        // console.log('Workload summary:', data);
       } else {
         console.error("Failed to fetch workload summary:", response.statusText);
       }
@@ -225,7 +225,7 @@ export default function ManagerDashboard() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "open": return <Clock className="w-4 h-4" />;
-      case "in-progress": return <TrendingUp className="w-4 h-4" />;
+      case "in_progress": return <TrendingUp className="w-4 h-4" />;
       case "resolved": return <CheckCircle className="w-4 h-4" />;
       case "closed": return <XCircle className="w-4 h-4" />;
       default: return <Ticket className="w-4 h-4" />;
@@ -236,17 +236,16 @@ export default function ManagerDashboard() {
     switch (status) {
       case 'open':
         return 'bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-full';
-      case 'in-progress':
-        return 'bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded-full'; // ✅ FIXED
+      case 'in_progress':
+        return 'bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded-full';
       case 'resolved':
         return 'bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded-full';
       case 'closed':
-        return 'bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded-full'; // ✅ FIXED
+        return 'bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded-full';
       default:
         return 'bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1 rounded-full';
     }
   };
-
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -267,11 +266,47 @@ export default function ManagerDashboard() {
       "bg-pink-100 text-pink-800",
       "bg-indigo-100 text-indigo-800",
       "bg-red-100 text-red-800",
-      "bg-teal-100 text-teal-800"
+      "bg-teal-100 text-teal-800",
+      "bg-orange-100 text-orange-800",
+      "bg-cyan-100 text-cyan-800",
+      "bg-amber-100 text-amber-800",
+      "bg-emerald-100 text-emerald-800"
     ];
     
-    if (tag === 'Untagged') return "bg-gray-100 text-gray-800";
+    if (tag === 'Untagged') return "bg-blue-100 text-blue-800";
+    if (tag === 'Others') return "bg-gray-100 text-gray-800";
+
     return colors[index % colors.length];
+  };
+
+  // Progress bar colors (keep vibrant for bars)
+  const getProgressBarColor = (tag: string, index: number) => {
+    const colors = [
+      'bg-blue-500', 'bg-purple-500', 'bg-green-500', 'bg-yellow-500',
+      'bg-pink-500', 'bg-indigo-500', 'bg-red-500', 'bg-teal-500',
+      'bg-orange-500', 'bg-cyan-500', 'bg-amber-500', 'bg-emerald-500'
+    ];
+    
+    if (tag === 'Others') return 'bg-gray-500';
+    return colors[index % colors.length];
+  };
+
+  // Process tags to show top N + Others
+  const processTagsForDisplay = (tagData: Record<string, number>): [string, number][] => {
+    const entries = Object.entries(tagData || {});
+    const sortedTags = entries.sort(([,a], [,b]) => b - a);
+    
+    const MAX_TAGS = 6; // Show top 6 tags
+    
+    if (sortedTags.length <= MAX_TAGS) {
+      return sortedTags.map(([tag, count]) => [tag, Number(count)]);
+    }
+    
+    const topTags = sortedTags.slice(0, MAX_TAGS - 1);
+    const otherTags = sortedTags.slice(MAX_TAGS - 1);
+    const othersCount = otherTags.reduce((sum, [, count]) => sum + Number(count), 0);
+    
+    return [...topTags.map(([tag, count]) => [tag, Number(count)] as [string, number]), ['Others', othersCount]];
   };
 
   // Helper function to get assignee name
@@ -370,7 +405,7 @@ export default function ManagerDashboard() {
   const stats = {
     total: tickets.length,
     open: tickets.filter(t => t.status === "open").length,
-    inProgress: tickets.filter(t => t.status === "in-progress").length,
+    inProgress: tickets.filter(t => t.status === "in_progress").length,
     resolved: tickets.filter(t => t.status === "resolved").length,
     urgent: tickets.filter(t => t.priority === "urgent").length,
   };
@@ -484,48 +519,68 @@ export default function ManagerDashboard() {
               </div>
             ) : analytics?.tags.length ? (
               <div className="space-y-4">
-                {analytics.tags.slice(0, 6).map((tagData, index) => (
-                  <div key={tagData.tag} className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <Badge className={getTagColor(tagData.tag, index)}>
-                          <Hash className="w-3 h-3 mr-1" />
-                          {tagData.tag}
-                        </Badge>
-                        <div className="flex gap-1 text-xs">
-                          <span className="text-blue-600">Dept: {tagData.departmentTickets}</span>
-                          <span className="text-purple-600">Mine: {tagData.myTickets}</span>
+                {processTagsForDisplay(
+                  Object.fromEntries(
+                    analytics.tags.map((tagData) => [tagData.tag, tagData.totalTickets])
+                  )
+                ).map(([tagName, totalCount]: [string, number], index: number) => {
+                  const originalTagData = analytics.tags.find(t => t.tag === tagName);
+                  const isOthersCategory = tagName === 'Others';
+                  
+                  return (
+                    <div key={tagName} className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <Badge className={getTagColor(tagName, index)}>
+                            <Hash className="w-3 h-3 mr-1" />
+                            {tagName}
+                            {isOthersCategory && ` (${analytics.tags.length - 5} tags)`}
+                          </Badge>
+                          {!isOthersCategory && originalTagData && (
+                            <div className="flex gap-1 text-xs">
+                              <span className="text-blue-600">Dept: {originalTagData.departmentTickets}</span>
+                              <span className="text-purple-600">Mine: {originalTagData.myTickets}</span>
+                            </div>
+                          )}
                         </div>
+                        <span className="text-sm text-muted-foreground">
+                          {totalCount} total ({Math.round((Number(totalCount) / Number(analytics.summary.totalTickets)) * 100)}%)
+                        </span>
                       </div>
-                      <span className="text-sm text-muted-foreground">
-                        {tagData.totalTickets} total
-                      </span>
+                      
+                      {/* Progress bar with unique colors */}
+                      <div className="w-full bg-muted rounded-full h-3">
+                        <div
+                          className={`rounded-full h-3 transition-all duration-500 ${getProgressBarColor(tagName, index)}`}
+                          style={{
+                            width: `${(Number(totalCount) / Number(analytics.summary.totalTickets)) * 100}%`
+                          }}
+                        />
+                      </div>
+                      
+                      {/* Status breakdown badges - only for real tags, not Others */}
+                      {!isOthersCategory && originalTagData && (
+                        <div className="flex flex-wrap gap-2">
+                          {Object.entries(originalTagData.statusBreakdown || {}).map(([status, count]) => (
+                            <Badge 
+                              key={status} 
+                              className={getStatusColor(status)}
+                              variant="secondary"
+                            >
+                              {status}: {count}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {isOthersCategory && (
+                        <div className="text-xs text-muted-foreground">
+                          Combined data from {analytics.tags.length - 5} less common tags
+                        </div>
+                      )}
                     </div>
-                    
-                    {/* Progress bar */}
-                    <div className="w-full bg-muted rounded-full h-3">
-                      <div
-                        className="bg-gradient-to-r from-violet-500 to-purple-600 rounded-full h-3 transition-all duration-500"
-                        style={{
-                          width: `${(tagData.totalTickets / analytics.summary.totalTickets) * 100}%`
-                        }}
-                      />
-                    </div>
-                    
-                    {/* Status breakdown badges */}
-                    <div className="flex flex-wrap gap-2">
-                      {Object.entries(tagData.statusBreakdown || {}).map(([status, count]) => (
-                        <Badge 
-                          key={status} 
-                          className={getStatusColor(status)}
-                          variant="secondary"
-                        >
-                          {status}: {count}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8 text-muted-foreground">
@@ -552,7 +607,7 @@ export default function ManagerDashboard() {
               <Button 
                 size="sm"
                 variant="outline" 
-                onClick={() => navigate("/all-tickets")}
+                onClick={() => navigate("/tickets")}
               >
                 <Eye className="w-4 h-4 mr-1" />
                 View All
@@ -601,6 +656,7 @@ export default function ManagerDashboard() {
                           </Badge>
                         ))}
                         <span className="text-xs text-gray-600">Assigned: {getAssigneeName(ticket.assignedTo)}</span>
+                        <Calendar className="w-3 h-3" />
                         <span className="text-xs text-gray-600">{new Date(ticket.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
@@ -609,7 +665,6 @@ export default function ManagerDashboard() {
                     <Badge className={getStatusColor(ticket.status)}>
                       {ticket.status.replace("-", " ").toUpperCase()}
                     </Badge>
-                    {/* FIXED: Navigation URL */}
                     <Button
                       size="sm"
                       variant="outline"

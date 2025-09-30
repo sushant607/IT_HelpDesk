@@ -204,6 +204,141 @@ router.get('/analytics/tags', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/tickets/analytics/employee-tags - Employee-specific analytics with dept access
+router.get('/analytics/employee-tags', authenticate, async (req, res) => {
+  try {
+    const { timeframe = '30' } = req.query;
+    const daysBack = parseInt(timeframe) || 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+
+    // COMBINED FILTER: Department tickets + Employee's tickets
+    const combinedFilter = {
+      createdAt: { $gte: startDate },
+      $or: [
+        { department: req.user.department },                             // Department tickets
+        { createdBy: new mongoose.Types.ObjectId(req.user.id) },        // Created by employee
+        { assignedTo: new mongoose.Types.ObjectId(req.user.id) }         // Assigned to employee
+      ]
+    };
+
+    // Employee filter: department tickets + their own tickets (like manager-tags but for employees)
+    const employeeTicketsFilter  = {
+      createdAt: { $gte: startDate },
+      $or: [
+        { createdBy: new mongoose.Types.ObjectId(req.user.id) },  // Their own tickets
+        { assignedTo: new mongoose.Types.ObjectId(req.user.id) } // Assigned to employee
+      ]
+    };
+
+    const departmentFilter = {
+      createdAt: { $gte: startDate },
+      department: req.user.department
+    };
+
+    const myTicketsCount = await Ticket.countDocuments(employeeTicketsFilter);
+    const deptTicketsCount = await Ticket.countDocuments(departmentFilter); 
+
+    // Get tag analytics for department + employee's tickets
+    const analytics = await Ticket.aggregate([
+      { $match: combinedFilter   },
+      { $unwind: { path: '$tags', preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: {
+            tag: { $ifNull: ['$tags', 'Untagged'] },
+            status: '$status',
+            priority: '$priority',
+            source: {
+              $cond: [
+                {
+                  $or: [
+                    { $eq: ['$createdBy', new mongoose.Types.ObjectId(req.user.id)] },
+                    { $eq: ['$assignedTo', new mongoose.Types.ObjectId(req.user.id)] }
+                  ]
+                },
+                'mine',
+                'department'
+              ]
+            }
+          },
+          count: { $sum: 1 },
+          tickets: {
+            $push: {
+              _id: '$_id',
+              title: '$title',
+              status: '$status',
+              priority: '$priority',
+              department: '$department',
+              createdAt: '$createdAt',
+              assignedTo: '$assignedTo'
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id.tag',
+          totalTickets: { $sum: '$count' },
+          departmentTickets: { $sum: {
+              $cond: [{ $eq: ['$_id.source', 'department'] }, '$count', 0]
+            } },
+          myTickets: { $sum: {
+              $cond: [{ $eq: ['$_id.source', 'mine'] }, '$count', 0]
+            } },
+          statusBreakdown: {
+            $push: {
+              status: '$_id.status',
+              count: '$count'
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          tag: '$_id',
+          totalTickets: 1,
+          departmentTickets: 1,
+          myTickets: 1,
+          statusBreakdown: {
+            $arrayToObject: {
+              $map: {
+                input: '$statusBreakdown',
+                as: 'status',
+                in: { k: '$$status.status', v: '$$status.count' }
+              }
+            }
+          }
+        }
+      },
+      { $sort: { totalTickets: -1 } }
+    ]);
+
+    // Employee summary with full department context
+    const summary = {
+      totalTags: analytics.length,
+      totalTickets: myTicketsCount,    // Total unique tickets (dept + mine)
+      departmentTickets: deptTicketsCount,  // Department context
+      myTickets: myTicketsCount,            // Employee's own tickets
+      timeframe: daysBack,
+      generatedAt: new Date()
+    };
+
+    return res.json({
+      success: true,
+      summary,
+      tags: analytics
+    });
+
+  } catch (error) {
+    console.error('GET /tickets/analytics/employee-tags error:', error);
+    return res.status500.json({
+      success: false,
+      msg: 'Error fetching employee tag analytics'
+    });
+  }
+});
+
 // GET /api/tickets/analytics/manager-tags - Get manager-specific tag analytics
 router.get('/analytics/manager-tags', authenticate, async (req, res) => {
   try {
@@ -223,6 +358,16 @@ router.get('/analytics/manager-tags', authenticate, async (req, res) => {
       ]
     };
     
+    const totalUniqueTickets = await Ticket.countDocuments(managerFilter);
+    const myTicketsCount = await Ticket.countDocuments({
+      createdAt: { $gte: startDate },
+      createdBy: new mongoose.Types.ObjectId(req.user.id)
+    });
+    const deptTicketsCount = await Ticket.countDocuments({
+      createdAt: { $gte: startDate },
+      department: req.user.department
+    });
+
     // Aggregation pipeline for manager tag analytics
     const analytics = await Ticket.aggregate([
       { $match: managerFilter },
@@ -318,9 +463,9 @@ router.get('/analytics/manager-tags', authenticate, async (req, res) => {
     
     const summary = {
       totalTags: analytics.length,
-      totalTickets: analytics.reduce((sum, tag) => sum + tag.totalTickets, 0),
-      departmentTickets: analytics.reduce((sum, tag) => sum + tag.departmentTickets, 0),
-      myTickets: analytics.reduce((sum, tag) => sum + tag.myTickets, 0),
+      totalTickets: totalUniqueTickets,
+      departmentTickets: deptTicketsCount, 
+      myTickets: myTicketsCount,
       timeframe: daysBack,
       generatedAt: new Date()
     };
@@ -682,6 +827,24 @@ router.get('/', authenticate, async (req, res) => {
       }
       filter.createdBy = new mongoose.Types.ObjectId(req.user.id);
       filter.department = req.user.department;
+    } else if (scope === 'department') {
+      if (req.user.role === 'manager') {
+        filter.department = req.user.department;
+      } else if (req.user.role === 'employee') {
+        filter.$and = [
+          { department: req.user.department },
+          {
+            $or: [
+              { createdBy: new mongoose.Types.ObjectId(req.user.id) },
+              { assignedTo: new mongoose.Types.ObjectId(req.user.id) },
+              { status: 'open' },
+              { tags: { $in: ['help-needed', 'collaboration'] } }
+            ]
+          }
+        ];
+      } else {
+        return res.status(403).json({ msg: 'Access denied' });
+      }
     } else {
       return res.status(400).json({ msg: 'Invalid scope. Use "me" or "team"' });
     }
@@ -694,7 +857,7 @@ router.get('/', authenticate, async (req, res) => {
       .populate('assignedTo', 'name email role department')
       .populate('comments.author','name')
    .sort({ createdAt: -1 });
-console.log(tickets[2].comments);
+// console.log(tickets[2].comments);
     if(keywords){
       const keywordArray = keywords.split('+');
       tickets = tickets.filter((ticket) => {
@@ -772,7 +935,7 @@ router.post('/', authenticate, async (req, res) => {
         comments,
         attachments
       });
-      console.log(doc)
+      // console.log(doc)
       return res.status(201).json({
         ticket_id: doc._id,
         message: 'Ticket created and assigned successfully',
@@ -877,7 +1040,8 @@ router.get('/:id', authenticate, async (req, res) => {
     const sameDept = ticket.department === req.user.department;
 
     if (req.user.role === 'employee') {
-      if (!(isCreator || isAssignee)) {
+      const canViewDepartment = sameDept && ['open'].includes(ticket.status);
+      if (!(isCreator || isAssignee || canViewDepartment)) {
         return res.status(403).json({ msg: 'Forbidden' });
       }
     } else if (req.user.role === 'manager' || req.user.role === 'admin') {
@@ -940,8 +1104,6 @@ router.patch('/:id/assign', authenticate, requireRole('manager', 'admin'), async
     }
   });
 
-  // ADD THESE ROUTES TO YOUR authTickets.js file:
-
 // POST /api/tickets/:id/comments - Add a comment to a ticket
 router.post('/:id/comments', authenticate, async (req, res) => {
   try {
@@ -969,7 +1131,7 @@ router.post('/:id/comments', authenticate, async (req, res) => {
     // Allow comments if user can view the ticket and it's not closed
     let canComment = false;
     if (req.user.role === 'employee') {
-      canComment = (isCreator || isAssignee) && ticket.status !== 'closed';
+      canComment = (isCreator || isAssignee || sameDept) && ticket.status !== 'closed';
     } else if (req.user.role === 'manager' || req.user.role === 'admin') {
       canComment = (sameDept || isCreator || isAssignee) && ticket.status !== 'closed';
     }

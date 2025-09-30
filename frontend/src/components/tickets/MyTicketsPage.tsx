@@ -14,6 +14,7 @@ import {
   Clock, 
   X, 
   User, 
+  Users, 
   AlertCircle,
   CheckCircle2,
   XCircle,
@@ -69,38 +70,48 @@ export default function MyTicketsPage() {
   const [currentUser, setCurrentUser] = useState<UserData | null>(null);
   const [remindingTickets, setRemindingTickets] = useState<Set<string>>(new Set());
   const [showReminderModal, setShowReminderModal] = useState(false);
+  const [loadingTickets, setLoadingTickets] = useState(false);
   const [selectedTicketForReminder, setSelectedTicketForReminder] = useState<string>('');
   const [reminderDate, setReminderDate] = useState('');
   const [reminderMessage, setReminderMessage] = useState('');
   const [ticketReminders, setTicketReminders] = useState<{[key: string]: ReminderData[]}>({});
+  const [viewMode, setViewMode] = useState<'personal' | 'department'>('personal');
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const navigate = useNavigate();
+  const userId = localStorage.getItem("user_id");
+  // Scroll to top button visibility
+  useEffect(() => {
+    const onScroll = () => {
+      setShowScrollTop(window.scrollY > 300);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   // Get current user data from JWT token
   useEffect(() => {
     const getCurrentUser = () => {
       try {
-        const token = localStorage.getItem("auth_token") || localStorage.getItem("token");
-        if (!token) return;
+        const userName = localStorage.getItem("user_name");
+        const userRole = localStorage.getItem("user_role");
+        const userDepartment = localStorage.getItem("user_department");
+        const userEmail = localStorage.getItem("user_email");
 
-        const tokenParts = token.split('.');
-        if (tokenParts.length !== 3) return;
-
-        const payload = JSON.parse(atob(tokenParts[1]));
-        if (payload.user) {
+        if (userName && userRole) {
           setCurrentUser({
-            id: payload.user.id,
-            name: payload.user.name || 'Unknown User',
-            email: payload.user.email || '',
-            role: payload.user.role || 'employee',
-            department: payload.user.department || ''
+            id: userId || '',
+            name: userName || 'Unknown User',
+            email: userEmail || '',
+            role: userRole || 'employee',
+            department: userDepartment || ''
           });
-          console.log("Current user from token:", payload.user);
         }
       } catch (error) {
-        console.error("Failed to decode user from token:", error);
+        console.error("Failed to get user from localStorage:", error);
       }
     };
-
     getCurrentUser();
   }, []);
 
@@ -161,7 +172,7 @@ export default function MyTicketsPage() {
           } : undefined,
         }));
 
-        console.log("Mapped tickets with assignedTo:", mapped);
+        // console.log("Mapped tickets with assignedTo:", mapped);
         setTickets(mapped);
         setFilteredTickets(mapped);
       } catch (e) {
@@ -197,6 +208,77 @@ export default function MyTicketsPage() {
 
     setFilteredTickets(filtered);
   }, [tickets, searchQuery, statusFilter, categoryFilter]);
+
+  useEffect(() => {
+    const fetchTickets = async () => {
+      try {
+        setLoadingTickets(true);
+        const token = localStorage.getItem("auth_token") || localStorage.getItem("token");
+        
+        // Dynamic URL based on view mode
+        const scope = viewMode === 'personal' ? 'me' : 'department';
+        const url = `http://localhost:5000/api/tickets?scope=${scope}`;
+        
+        const res = await fetch(url, {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        });
+
+        const txt = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(txt);
+        } catch {
+          data = txt;
+        }
+
+        if (res.ok) {
+          // Handle both response formats: direct array or { tickets: [...] }
+          let ticketList: any[] = [];
+          if (Array.isArray(data)) {
+            ticketList = data;
+          } else if (data && typeof data === 'object' && Array.isArray(data.tickets)) {
+            ticketList = data.tickets;
+          } else {
+            ticketList = [];
+          }
+
+          const mapped: TicketData[] = ticketList.map((t: any) => ({
+            id: t._id,
+            title: t.title,
+            description: t.description ?? "",
+            category: t.department ?? "General",
+            status: t.status === "in_progress" ? "in-progress" : t.status,
+            priority: t.priority,
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+            createdByName: t?.createdBy?.name || undefined,
+            assignedTo: t.assignedTo ? {
+              _id: t.assignedTo._id,
+              name: t.assignedTo.name,
+              email: t.assignedTo.email
+            } : undefined,
+          }));
+
+          setTickets(mapped);
+          setFilteredTickets(mapped);
+        } else {
+          const msg = typeof data === 'string' ? data : (data as any)?.msg || 'Failed to load tickets';
+          toast.error(msg);
+        }
+
+      } catch (error) {
+        console.error('Failed to load tickets:', error);
+        toast.error('Failed to load tickets');
+      } finally {
+        setLoadingTickets(false);
+      }
+    };
+
+    fetchTickets();
+  }, [viewMode]);
 
   const isManager = currentUser?.role === 'manager';
 
@@ -393,9 +475,9 @@ export default function MyTicketsPage() {
       {/* Enhanced Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              My Tickets
+          <div className="flex items-center gap-3 leading-none overflow-visible">
+            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent leading-tight overflow-visible py-1">
+              {viewMode === 'personal' ? 'My Tickets' : 'Department Tickets'}
             </h1>
             {isManager && (
               <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200 px-3 py-1">
@@ -410,8 +492,30 @@ export default function MyTicketsPage() {
               </Badge>
             )}
           </div>
+          <div className="flex gap-2">
+            <Button
+              variant={viewMode === 'personal' ? 'default' : 'outline'}
+              onClick={() => setViewMode('personal')}
+              className="transition-all duration-200"
+            >
+              <User className="w-4 h-4 mr-2" />
+              My Tickets
+            </Button>
+            <Button
+              variant={viewMode === 'department' ? 'default' : 'outline'}
+              onClick={() => setViewMode('department')}
+              className="transition-all duration-200"
+            >
+              <Users className="w-4 h-4 mr-2" />
+              Department View
+            </Button>
+          </div>
+          
           <p className="text-muted-foreground text-lg">
-            Track and manage your support requests efficiently
+            {viewMode === 'personal' 
+              ? 'Track and manage your support requests efficiently'
+              : 'View and collaborate on department tickets'
+            }
           </p>
         </div>
         <Button 
@@ -472,15 +576,14 @@ export default function MyTicketsPage() {
         </CardContent>
       </Card>
 
-      {/* Stats Cards for Manager */}
-      {isManager && (
+      {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-blue-600 font-medium">Total Tickets</p>
-                  <p className="text-2xl font-bold text-blue-900">{tickets.length}</p>
+                  <p className="text-2xl font-bold text-blue-900">{Array.isArray(tickets) ? tickets.length : 0}</p>
                 </div>
                 <AlertCircle className="w-8 h-8 text-blue-500" />
               </div>
@@ -492,7 +595,7 @@ export default function MyTicketsPage() {
                 <div>
                   <p className="text-sm text-amber-600 font-medium">In Progress</p>
                   <p className="text-2xl font-bold text-amber-900">
-                    {tickets.filter(t => t.status === 'in-progress').length}
+                    {Array.isArray(tickets) ? tickets.filter(t => t.status === 'in-progress').length : 0}
                   </p>
                 </div>
                 <Clock className="w-8 h-8 text-amber-500" />
@@ -505,7 +608,7 @@ export default function MyTicketsPage() {
                 <div>
                   <p className="text-sm text-red-600 font-medium">Urgent</p>
                   <p className="text-2xl font-bold text-red-900">
-                    {tickets.filter(t => t.priority === 'urgent').length}
+                    {Array.isArray(tickets) ? tickets.filter(t => t.priority === 'urgent').length : 0}
                   </p>
                 </div>
                 <Zap className="w-8 h-8 text-red-500" />
@@ -518,7 +621,7 @@ export default function MyTicketsPage() {
                 <div>
                   <p className="text-sm text-green-600 font-medium">Resolved</p>
                   <p className="text-2xl font-bold text-green-900">
-                    {tickets.filter(t => t.status === 'resolved').length}
+                    {Array.isArray(tickets) ? tickets.filter(t => t.status === 'resolved').length : 0}
                   </p>
                 </div>
                 <CheckCircle2 className="w-8 h-8 text-green-500" />
@@ -526,7 +629,6 @@ export default function MyTicketsPage() {
             </CardContent>
           </Card>
         </div>
-      )}
 
       {/* Enhanced Tickets List */}
       <div className="space-y-4">
@@ -621,7 +723,7 @@ export default function MyTicketsPage() {
                       <span className="text-sm">
                         <span className="text-muted-foreground">Assigned to:</span>
                         <br />
-                        <span className="font-medium">{ticket.assignedTo.name}</span>
+                        <span className="font-medium">{ticket.assignedTo?._id === userId  ? 'Me' : ticket.assignedTo.name}</span>
                       </span>
                     </div>
                   )}
@@ -630,15 +732,19 @@ export default function MyTicketsPage() {
                 {/* Enhanced Action Buttons */}
                 <div className="flex gap-3 justify-end pt-2">
                   {/* Employee Set Reminder Button */}
-                  {(currentUser?.role === 'employee') && (
+                  {(currentUser?.role === 'employee' && 
+                    (ticket.createdByName === currentUser.name || 
+                    ticket.assignedTo?.name === currentUser.name ||
+                    ticket.createdByName === currentUser.name)) && (
                     <Button
-                      variant="outline"
+                      variant="outline" 
                       size="sm"
                       onClick={() => handleSetReminder(ticket.id)}
+                      disabled={remindingTickets.has(ticket.id)}
                       className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 hover:border-blue-300 transition-colors"
                     >
                       <Bell className="w-4 h-4 mr-2" />
-                      Set Reminder
+                      {remindingTickets.has(ticket.id) ? 'Setting...' : 'Set Reminder'}
                     </Button>
                   )}
 
@@ -663,7 +769,10 @@ export default function MyTicketsPage() {
                     className="hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 transition-colors"
                   >
                     <Eye className="w-4 h-4 mr-2" />
-                    View Details
+                    {(isManager || ticket.createdByName === currentUser?.name || ticket.assignedTo?.name === currentUser?.name) 
+                      ? 'Edit Details' 
+                      : 'View Details'
+                    }
                   </Button>
                 </div>
               </CardContent>
@@ -766,6 +875,19 @@ export default function MyTicketsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Scroll to Top Button */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          aria-label="Scroll to top"
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center h-11 w-11 rounded-full shadow-lg bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-all"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+          </svg>
+        </button>
       )}
     </div>
   );

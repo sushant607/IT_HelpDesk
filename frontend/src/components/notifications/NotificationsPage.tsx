@@ -100,6 +100,7 @@ export default function NotificationsPage() {
     toast({
       title: "Notification marked as read",
       description: "The notification has been marked as read.",
+      duration: 2000
     });
   }catch (err) {
       console.error("Error marking notification as read:", err);
@@ -130,6 +131,7 @@ export default function NotificationsPage() {
     toast({
       title: "All notifications marked as read",
       description: "All notifications have been marked as read.",
+      duration: 2000
     });
   } catch (err) {
     console.error("Error marking all notifications as read:", err);
@@ -151,6 +153,7 @@ export default function NotificationsPage() {
     toast({
       title: "Notification deleted",
       description: "The notification has been removed.",
+      duration: 2000
     });
   }catch(err){
   console.error("Error deleting the notification:", err);

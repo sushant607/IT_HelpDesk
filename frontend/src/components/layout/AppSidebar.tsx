@@ -41,7 +41,6 @@ export function AppSidebar() {
   const navigationItems: NavItem[] = [
     { title: "Dashboard", url: "/dashboard", icon: Home },
     { title: "My Tickets", url: "/dashboard/tickets", icon: Ticket },
-    // { title: "All Tickets", url: "/dashboard/all-tickets", icon: Ticket, roles: ["manager"] },
     { title: "Chatbot", url: "/dashboard/chatbot", icon: MessageSquare },
     { title: "Notifications", url: "/dashboard/notifications", icon: Bell, badge: unreadCount > 0 ? unreadCount.toString() : undefined },
   ];
@@ -112,7 +111,6 @@ export function AppSidebar() {
                           </span>
                         )}
                       </div>
-                      {/* ADD THIS BADGE */}
                       {item.badge && !collapsed && (
                         <Badge variant="destructive" className="ml-auto text-xs">
                           {item.badge}

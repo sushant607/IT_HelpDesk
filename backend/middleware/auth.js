@@ -16,8 +16,10 @@ module.exports = function authenticate(req, res, next) {
       return res.status(401).json({ msg: 'Invalid token structure' });
     }
 
+    console.log(decoded);
     req.user = {
       id: decoded.user.id,
+      name: decoded.user.name || null,
       email: decoded.user.email || null,
       role: decoded.user.role || 'employee',
       department: decoded.user.department || null,

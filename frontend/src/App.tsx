@@ -19,7 +19,7 @@ import TeamWorkloadPage from "./components/dashboard/TeamWorkloadPage";
 
 const queryClient = new QueryClient();
 
-// ✅ Enhanced Authentication Hook
+// Enhanced Authentication Hook
 const useAuth = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -31,11 +31,11 @@ const useAuth = () => {
       const userName = localStorage.getItem("user_name");
       const userRole = localStorage.getItem("user_role");
       
-      // ✅ Comprehensive auth check
+      // Comprehensive auth check
       if (token && userId && userName && userRole) {
         setIsAuthenticated(true);
       } else {
-        // ✅ Clear any partial authentication data
+        // Clear any partial authentication data
         localStorage.removeItem("auth_token");
         localStorage.removeItem("user_id");
         localStorage.removeItem("user_name");
@@ -48,7 +48,7 @@ const useAuth = () => {
 
     checkAuth();
 
-    // ✅ Listen for storage changes (multi-tab logout detection)
+    // Listen for storage changes (multi-tab logout detection)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === "auth_token") {
         checkAuth();
@@ -62,7 +62,7 @@ const useAuth = () => {
   return { isAuthenticated, isLoading };
 };
 
-// ✅ Loading Screen Component
+// Loading Screen Component
 const LoadingScreen = () => (
   <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
     <div className="text-center">
@@ -73,7 +73,7 @@ const LoadingScreen = () => (
   </div>
 );
 
-// ✅ Enhanced Protected Route Component (blocks unauthenticated users)
+// Enhanced Protected Route Component (blocks unauthenticated users)
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading } = useAuth();
   
@@ -81,7 +81,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     return <LoadingScreen />;
   }
   
-  // ✅ FIXED: Force unauthenticated users to login
+  // FIXED: Force unauthenticated users to login
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -89,7 +89,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-// ✅ Auth Route Component (prevents authenticated users from seeing login/signup)
+// Auth Route Component (prevents authenticated users from seeing login/signup)
 const AuthRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading } = useAuth();
   
@@ -97,7 +97,7 @@ const AuthRoute = ({ children }: { children: React.ReactNode }) => {
     return <LoadingScreen />;
   }
   
-  // ✅ FIXED: Redirect authenticated users to dashboard (prevents back navigation to login)
+  // FIXED: Redirect authenticated users to dashboard (prevents back navigation to login)
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -105,7 +105,7 @@ const AuthRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-// ✅ Enhanced Role-based Route Component
+// Enhanced Role-based Route Component
 const RoleBasedRoute = ({ children, allowedRoles }: { children: React.ReactNode; allowedRoles: string[] }) => {
   const { isAuthenticated, isLoading } = useAuth();
   const userRole = localStorage.getItem("user_role");
@@ -125,7 +125,7 @@ const RoleBasedRoute = ({ children, allowedRoles }: { children: React.ReactNode;
   return <>{children}</>;
 };
 
-// ✅ Smart Root Redirect Component
+// Smart Root Redirect Component
 const RootRedirect = () => {
   const { isAuthenticated, isLoading } = useAuth();
   
@@ -143,10 +143,10 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          {/* ✅ Smart root redirect based on authentication status */}
+          {/* Smart root redirect based on authentication status */}
           <Route path="/" element={<RootRedirect />} />
           
-          {/* ✅ Auth routes - blocked for authenticated users */}
+          {/* Auth routes - blocked for authenticated users */}
           <Route 
             path="/login" 
             element={
@@ -164,7 +164,7 @@ const App = () => (
             } 
           />
           
-          {/* ✅ Protected dashboard routes - blocked for unauthenticated users */}
+          {/* Protected dashboard routes - blocked for unauthenticated users */}
           <Route 
             path="/dashboard" 
             element={
@@ -197,7 +197,7 @@ const App = () => (
             <Route path="chatbot" element={<ChatbotPage />} />
           </Route>
           
-          {/* ✅ Catch-all route aliases with authentication protection */}
+          {/* Catch-all route aliases with authentication protection */}
           <Route 
             path="/tickets" 
             element={
@@ -214,14 +214,14 @@ const App = () => (
               </ProtectedRoute>
             } 
           />
-          <Route 
+          {/* <Route 
             path="/all-tickets" 
             element={
               <ProtectedRoute>
                 <Navigate to="/dashboard/all-tickets" replace />
               </ProtectedRoute>
             } 
-          />
+          /> */}
           <Route 
             path="/chatbot" 
             element={
@@ -239,7 +239,7 @@ const App = () => (
             } 
           />
           
-          {/* ✅ Catch-all for any unmatched routes */}
+          {/* Catch-all for any unmatched routes */}
           <Route path="*" element={<RootRedirect />} />
         </Routes>
       </BrowserRouter>

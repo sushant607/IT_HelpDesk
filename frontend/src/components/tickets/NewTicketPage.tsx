@@ -327,13 +327,16 @@ export default function NewTicketPage() {
       toast({
         title: "Ticket created successfully!",
         description: `Ticket has been created and assigned ID: ${ticketId.slice(-8).toUpperCase()}`,
+        duration: 2000
       });
 
-      if (userRole === "manager" || userRole === "admin") {
-        navigate("/dashboard/all-tickets");
-      } else {
-        navigate("/dashboard/tickets");
-      }
+      // if (userRole === "manager" || userRole === "admin") {
+      //   navigate("/dashboard/all-tickets");
+      // } else {
+      //   navigate("/dashboard/tickets");
+      // }.
+
+      navigate("/dashboard/tickets");
       
     } catch (err: any) {
       console.error("Error creating ticket:", err);
@@ -353,7 +356,7 @@ export default function NewTicketPage() {
         });
         const data = await res.json();
         // assuming backend returns [{id, name}, ...]
-        console.log(data);
+        // console.log(data);
         setEmployees(data);
       } catch (err) {
         console.error("Failed to load employees", err);

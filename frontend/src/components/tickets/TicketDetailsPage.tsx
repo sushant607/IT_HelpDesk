@@ -322,7 +322,7 @@ useEffect(() => {
     if (ticket.status === "closed") return false;
 
     if (userRole === "employee") {
-      return isCreator || isAssignee;
+      return isCreator || isAssignee || sameDept;
     }
 
     if (userRole === "manager" || userRole === "admin") {
@@ -405,6 +405,7 @@ useEffect(() => {
       toast({
         title: "Success",
         description: `Ticket has been updated successfully.`,
+        duration: 2000
       });
     } catch (err: unknown) {
       console.error("Error updating ticket:", err);
@@ -430,6 +431,7 @@ useEffect(() => {
       toast({
         title: "Comment added",
         description: "Your comment has been added successfully.",
+        duration: 2000
       });
     } catch (err: unknown) {
       console.error("Error adding comment:", err);
@@ -437,6 +439,7 @@ useEffect(() => {
         title: "Error",
         description: getErrorMessage(err),
         variant: "destructive",
+        duration: 2000
       });
     } finally {
       setIsAddingComment(false);
@@ -454,6 +457,7 @@ useEffect(() => {
         title: "Invalid file type",
         description: `Files not supported: ${invalidFiles.map(f => f.name).join(', ')}`,
         variant: "destructive",
+        duration: 2000
       });
       return;
     }
@@ -463,7 +467,7 @@ useEffect(() => {
       const uploadedAttachments = [];
       
       for (const file of Array.from(selectedFiles)) {
-        console.log('Uploading file:', file.name);
+        // console.log('Uploading file:', file.name);
         
         const formData = new FormData();
         formData.append('file', file);
@@ -505,6 +509,7 @@ useEffect(() => {
       toast({
         title: "Files uploaded",
         description: `${uploadedAttachments.length} file(s) uploaded successfully.`,
+        duration: 2000
       });
     } catch (err: unknown) {
       console.error("Error uploading files:", err);
@@ -512,6 +517,7 @@ useEffect(() => {
         title: "Upload failed",
         description: getErrorMessage(err),
         variant: "destructive",
+        duration: 2000
       });
     } finally {
       setIsUploadingFiles(false);
@@ -538,6 +544,7 @@ useEffect(() => {
         title: "Error",
         description: getErrorMessage(err),
         variant: "destructive",
+        duration: 2000
       });
     }
   };
@@ -562,6 +569,7 @@ useEffect(() => {
         title: "Error",
         description: getErrorMessage(err),
         variant: "destructive",
+        duration: 2000
       });
     }
   };
@@ -599,6 +607,7 @@ useEffect(() => {
         title: "Some files not supported",
         description: `Unsupported files: ${invalidFiles.map(f => f.name).join(', ')}`,
         variant: "destructive",
+        duration: 2000
       });
       
       // Filter out invalid files
@@ -711,10 +720,6 @@ const onSubmitStatus = async () => {
   }
 };
 
-
-
-
-
  return (
   <div className="space-y-6 max-w-4xl">
     {/* Header */}
@@ -746,8 +751,8 @@ const onSubmitStatus = async () => {
           </Button>
         )}
 
-        {/* ADDED: Status dropdown + Complete button (no other changes) */}
-        <div className="flex items-center gap-2">
+        {/* ADDED: Status dropdown + Complete button */}
+        {canEdit() && (<div className="flex items-center gap-2">
           <label htmlFor="statusSelect" className="text-sm text-muted-foreground">Status</label>
           <select
             id="statusSelect"
@@ -772,7 +777,7 @@ const onSubmitStatus = async () => {
           >
             {saving ? 'Saving…' : 'Complete'}
           </Button>
-        </div>
+        </div>)}
         {/* END ADDED */}
       </div>
     </div>

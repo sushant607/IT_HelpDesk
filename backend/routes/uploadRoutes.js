@@ -197,7 +197,6 @@ async function ensureUserIndex({ tickets, userId, project, size = 600, overlap =
       const a = attachments[ai];
       const url = typeof a === 'string' ? a : a?.url;
       const filename = typeof a === 'string' ? undefined : a?.filename;
-      console.log("here");
       console.log(a);
       if (!url || seen.has(url)) continue;
       seen.add(url);
