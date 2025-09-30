@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Bot, User, Send, Loader2, Ticket, Copy, Check, ExternalLink, FileText, Clock } from "lucide-react";
+import { Bot, User, Send, Loader2, Ticket, Copy, Check, ExternalLink, FileText, Clock,  Sparkles,  StopCircle,  RefreshCw,  Settings,  MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiService } from "@/services/api";
-import { Link } from "react-router-dom";
+
 interface ChatMessage {
   id: string;
   content: string;
@@ -15,13 +15,14 @@ interface ChatMessage {
   timestamp: Date;
   ticketId?: string;
   tickets?: object[];
+  isStreaming?: boolean;
 }
 
-export default function ChatbotPage() {
+export default function ModernChatbotPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
-      id: "1",
-      content: "Hi! I'm your IT support assistant. I can help you with password resets, software issues, and create tickets for other problems. How can I help you today?",
+      id: "welcome",
+      content: "Hi! I'm your AI-powered IT support assistant. I can help you with password resets, software troubleshooting, hardware issues, and create support tickets. What can I help you with today?",
       sender: "bot",
       timestamp: new Date(),
     }
@@ -29,8 +30,10 @@ export default function ChatbotPage() {
   const [input, setInput] = useState("");
   const [answerFromAttachments, setAnswerFromAttachments] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
 
   const scrollToBottom = () => {
@@ -41,12 +44,24 @@ export default function ChatbotPage() {
     scrollToBottom();
   }, [messages]);
 
-  // Enhanced response parser with better formatting
-  const parseResponse = (content: string) => {
+  // Auto-resize textarea
+  const adjustTextareaHeight = () => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+    }
+  };
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input]);
+
+  // Enhanced response parser with better markdown support
+  const parseMarkdown = (content: string) => {
     const sections = [];
     let currentSection = { type: 'text', content: '' };
 
-    // Split content into lines for processing
     const lines = content.split('\n');
     let inCodeBlock = false;
     let codeContent = '';
@@ -58,7 +73,6 @@ export default function ChatbotPage() {
       // Handle code blocks
       if (line.startsWith('```')) {
         if (!inCodeBlock) {
-          // Starting code block
           if (currentSection.content.trim()) {
             sections.push({ ...currentSection });
           }
@@ -67,7 +81,6 @@ export default function ChatbotPage() {
           codeContent = '';
           currentSection = { type: 'text', content: '' };
         } else {
-          // Ending code block
           inCodeBlock = false;
           sections.push({
             type: 'code',
@@ -85,50 +98,28 @@ export default function ChatbotPage() {
         continue;
       }
 
-      // Handle different line types
-      if (line.startsWith('# ')) {
-        if (currentSection.content.trim()) {
-          sections.push({ ...currentSection });
-        }
-        sections.push({
-          type: 'heading',
-          content: line.replace('# ', ''),
-          level: 1
-        });
+      // Handle headings
+      if (line.startsWith('### ')) {
+        if (currentSection.content.trim()) sections.push({ ...currentSection });
+        sections.push({ type: 'heading', content: line.replace('### ', ''), level: 3 });
         currentSection = { type: 'text', content: '' };
       } else if (line.startsWith('## ')) {
-        if (currentSection.content.trim()) {
-          sections.push({ ...currentSection });
-        }
-        sections.push({
-          type: 'heading',
-          content: line.replace('## ', ''),
-          level: 2
-        });
+        if (currentSection.content.trim()) sections.push({ ...currentSection });
+        sections.push({ type: 'heading', content: line.replace('## ', ''), level: 2 });
         currentSection = { type: 'text', content: '' };
-      } else if (line.startsWith('### ')) {
-        if (currentSection.content.trim()) {
-          sections.push({ ...currentSection });
-        }
-        sections.push({
-          type: 'heading',
-          content: line.replace('### ', ''),
-          level: 3
-        });
+      } else if (line.startsWith('# ')) {
+        if (currentSection.content.trim()) sections.push({ ...currentSection });
+        sections.push({ type: 'heading', content: line.replace('# ', ''), level: 1 });
         currentSection = { type: 'text', content: '' };
       } else if (line.startsWith('- ') || line.startsWith('* ')) {
         if (currentSection.type !== 'list') {
-          if (currentSection.content && currentSection.content.trim()) {
-            sections.push({ ...currentSection });
-          }
+          if (currentSection.content.trim()) sections.push({ ...currentSection });
           currentSection = { type: 'list', content: '', items: [] };
         }
         currentSection.items.push(line.replace(/^[-*] /, ''));
       } else if (line.match(/^\d+\. /)) {
         if (currentSection.type !== 'numbered-list') {
-          if (currentSection.content && currentSection.content.trim()) {
-            sections.push({ ...currentSection });
-          }
+          if (currentSection.content.trim()) sections.push({ ...currentSection });
           currentSection = { type: 'numbered-list', content: '', items: [] };
         }
         currentSection.items.push(line.replace(/^\d+\. /, ''));
@@ -148,101 +139,117 @@ export default function ChatbotPage() {
     return sections;
   };
 
-  // Enhanced link renderer with better detection
-  const renderWithLinks = (text: string): React.ReactNode[] => {
-    // First, normalize markdown-style [label](url)
-    const mdLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  // Enhanced text processing with inline formatting
+  const processInlineFormatting = (text: string): React.ReactNode[] => {
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
-    let match: RegExpExecArray | null;
     let keyIndex = 0;
 
-    // Handle markdown links first
-    const processedText = text.replace(mdLinkRegex, (match, label, url) => {
+    // Handle bold **text**
+    const boldRegex = /\*\*(.*?)\*\*/g;
+    const italicRegex = /\*(.*?)\*/g;
+    const inlineCodeRegex = /`([^`]+)`/g;
+    const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    const urlRegex = /(https?:\/\/[^\s)]+)(?=[\s)|\]]|$)/g;
+
+    let processedText = text;
+    
+    // First handle markdown links
+    processedText = processedText.replace(linkRegex, (match, label, url) => {
       return `MARKDOWN_LINK_${keyIndex++}|${label}|${url}`;
     });
 
-    // Now handle plain URLs
-    const urlRegex = /(https?:\/\/[^\s)]+)(?=[\s)|\]]|$)/g;
-    lastIndex = 0;
+    // Then handle other formatting
+    const combinedRegex = /(\*\*.*?\*\*|\*.*?\*|`[^`]+`|https?:\/\/[^\s)]+|MARKDOWN_LINK_\d+\|[^|]+\|[^|]+)/g;
+    let match;
 
-    while ((match = urlRegex.exec(processedText)) !== null) {
-      const url = match[1];
-      
-      // Add text before URL
+    while ((match = combinedRegex.exec(processedText)) !== null) {
       if (match.index > lastIndex) {
-        const beforeText = processedText.slice(lastIndex, match.index);
-        parts.push(beforeText);
+        parts.push(processedText.slice(lastIndex, match.index));
       }
+
+      const matchedText = match[1];
       
-      // Add clickable link
-      parts.push(
-        <a
-          key={`url-${keyIndex++}`}
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline transition-colors"
-        >
-          <ExternalLink className="w-3 h-3" />
-          click here
-        </a>
-      );
-      
-      lastIndex = match.index + url.length;
+      if (matchedText.startsWith('MARKDOWN_LINK_')) {
+        const [, label, url] = matchedText.split('|');
+        parts.push(
+          <a
+            key={`link-${keyIndex++}`}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-600 underline decoration-2 underline-offset-2 transition-colors"
+          >
+            {label}
+          </a>
+        );
+      } else if (matchedText.startsWith('**') && matchedText.endsWith('**')) {
+        parts.push(
+          <strong key={`bold-${keyIndex++}`} className="font-semibold">
+            {matchedText.slice(2, -2)}
+          </strong>
+        );
+      } else if (matchedText.startsWith('*') && matchedText.endsWith('*')) {
+        parts.push(
+          <em key={`italic-${keyIndex++}`} className="italic">
+            {matchedText.slice(1, -1)}
+          </em>
+        );
+      } else if (matchedText.startsWith('`') && matchedText.endsWith('`')) {
+        parts.push(
+          <code key={`code-${keyIndex++}`} className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm font-mono">
+            {matchedText.slice(1, -1)}
+          </code>
+        );
+      } else if (matchedText.startsWith('http')) {
+        parts.push(
+          <a
+            key={`url-${keyIndex++}`}
+            href={matchedText}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 hover:text-blue-600 underline decoration-2 underline-offset-2 transition-colors inline-flex items-center gap-1"
+          >
+            <ExternalLink className="w-3 h-3" />
+            View Link
+          </a>
+        );
+      } else {
+        parts.push(matchedText);
+      }
+
+      lastIndex = match.index + matchedText.length;
     }
 
-    // Add remaining text
     if (lastIndex < processedText.length) {
-      const remainingText = processedText.slice(lastIndex);
-      parts.push(remainingText);
+      parts.push(processedText.slice(lastIndex));
     }
 
-    // Now process markdown link placeholders
-    return parts.flatMap((part, index) => {
-      if (typeof part === 'string' && part.includes('MARKDOWN_LINK_')) {
-        const linkParts = part.split(/(MARKDOWN_LINK_\d+\|[^|]+\|[^|]+)/);
-        return linkParts.map((linkPart, linkIndex) => {
-          if (linkPart.startsWith('MARKDOWN_LINK_')) {
-            const [, label, url] = linkPart.split('|');
-            return (
-              <a
-                key={`md-link-${index}-${linkIndex}`}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline transition-colors"
-              >
-                <ExternalLink className="w-3 h-3" />
-                {label}
-              </a>
-            );
-          }
-          return linkPart || null;
-        }).filter(Boolean);
-      }
-      return part;
-    });
+    return parts.filter(part => part !== '');
   };
 
   // Enhanced message content renderer
   const renderMessageContent = (message: ChatMessage) => {
     if (message.sender !== "bot") {
-      return <div className="whitespace-pre-wrap break-words">{message.content}</div>;
+      return (
+        <div className="whitespace-pre-wrap break-words leading-relaxed">
+          {message.content}
+        </div>
+      );
     }
 
-    const sections = parseResponse(message.content);
+    const sections = parseMarkdown(message.content);
 
     return (
-      <div className="space-y-3">
+      <div className="space-y-4 ">
         {sections.map((section, index) => {
           switch (section.type) {
             case 'heading':
               const HeadingTag = `h${section.level}` as keyof JSX.IntrinsicElements;
               const headingClasses = {
-                1: "text-lg font-bold text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700 pb-1",
-                2: "text-base font-semibold text-gray-800 dark:text-gray-200",
-                3: "text-sm font-medium text-gray-700 dark:text-gray-300"
+                1: "text-xl font-bold text-gray-900 dark:text-gray-100 mb-3",
+                2: "text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2",
+                3: "text-base font-medium text-gray-700 dark:text-gray-300 mb-2"
               };
               return (
                 <HeadingTag key={index} className={headingClasses[section.level] || headingClasses[3]}>
@@ -252,26 +259,26 @@ export default function ChatbotPage() {
 
             case 'code':
               return (
-                <div key={index} className="relative">
-                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-gray-200 dark:bg-gray-700 border-b">
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                <div key={index} className="my-4">
+                  <div className="bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">
                         {section.language || 'Code'}
                       </span>
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-6 px-2"
+                        className="h-7 px-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
                         onClick={() => {
                           navigator.clipboard.writeText(section.content);
                           toast({ description: "Code copied to clipboard!", duration: 2000});
                         }}
                       >
-                        <Copy className="w-3 h-3" />
+                        <Copy className="w-4 h-4" />
                       </Button>
                     </div>
-                    <pre className="p-3 text-sm overflow-x-auto">
-                      <code className="text-gray-800 dark:text-gray-200">
+                    <pre className="p-4 text-sm overflow-x-auto">
+                      <code className="text-gray-800 dark:text-gray-200 leading-relaxed">
                         {section.content}
                       </code>
                     </pre>
@@ -281,12 +288,12 @@ export default function ChatbotPage() {
 
             case 'list':
               return (
-                <ul key={index} className="space-y-1 ml-4">
+                <ul key={index} className="space-y-2 my-3">
                   {section.items.map((item, itemIndex) => (
-                    <li key={itemIndex} className="flex items-start gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />
-                      <span className="text-sm leading-relaxed">
-                        {renderWithLinks(item)}
+                    <li key={itemIndex} className="flex items-start gap-3">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2.5 flex-shrink-0" />
+                      <span className="leading-relaxed">
+                        {processInlineFormatting(item)}
                       </span>
                     </li>
                   ))}
@@ -295,14 +302,14 @@ export default function ChatbotPage() {
 
             case 'numbered-list':
               return (
-                <ol key={index} className="space-y-1 ml-4">
+                <ol key={index} className="space-y-2 my-3">
                   {section.items.map((item, itemIndex) => (
                     <li key={itemIndex} className="flex items-start gap-3">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 text-xs font-medium flex items-center justify-center mt-0.5">
+                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 text-xs font-medium flex items-center justify-center mt-1">
                         {itemIndex + 1}
                       </span>
-                      <span className="text-sm leading-relaxed">
-                        {renderWithLinks(item)}
+                      <span className="leading-relaxed">
+                        {processInlineFormatting(item)}
                       </span>
                     </li>
                   ))}
@@ -312,8 +319,8 @@ export default function ChatbotPage() {
             default:
               if (!section.content || !section.content.trim()) return null;
               return (
-                <div key={index} className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                  {renderWithLinks(section.content)}
+                <div key={index} className="leading-relaxed whitespace-pre-wrap break-words">
+                  {processInlineFormatting(section.content)}
                 </div>
               );
           }
@@ -330,25 +337,62 @@ export default function ChatbotPage() {
       setTimeout(() => setCopiedMessageId(null), 2000);
     } catch (err) {
       toast({ description: "Failed to copy message", variant: "destructive", duration: 2000});
+      toast({ description: "Failed to copy", variant: "destructive" });
     }
   };
 
+  // Simulated streaming function (replace with actual streaming implementation)
+  const simulateStreaming = async (botMessageId: string, fullContent: string) => {
+    const words = fullContent.split(' ');
+    let currentContent = '';
+    
+    for (let i = 0; i < words.length; i++) {
+      currentContent += (i > 0 ? ' ' : '') + words[i];
+      
+      setMessages(prev => prev.map(msg => 
+        msg.id === botMessageId 
+          ? { ...msg, content: currentContent, isStreaming: true }
+          : msg
+      ));
+      
+      await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
+    }
+    
+    setMessages(prev => prev.map(msg => 
+      msg.id === botMessageId 
+        ? { ...msg, isStreaming: false }
+        : msg
+    ));
+  };
+
   const handleSendMessage = async () => {
-    if (!input.trim()) return;
-  
+    if (!input.trim() || isLoading) return;
+
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       content: input,
       sender: "user",
       timestamp: new Date(),
     };
+
     setMessages(prev => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
-  
+    setIsStreaming(true);
+
+    // Create placeholder bot message
+    const botMessageId = `bot-${Date.now()}`;
+    const botMessage: ChatMessage = {
+      id: botMessageId,
+      content: "",
+      sender: "bot",
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+    setMessages(prev => [...prev, botMessage]);
+
     try {
       if (answerFromAttachments) {
-        // console.log("RAG mode enabled");
         const token = localStorage.getItem('auth_token');
         
         const resp = await fetch('http://localhost:5000/api/upload/tickets/me/rag/query', {
@@ -365,33 +409,26 @@ export default function ChatbotPage() {
             reindex: false
           }),
         });
-  
+
         if (!resp.ok) {
           const errorData = await resp.json();
           throw new Error(errorData?.error || `HTTP ${resp.status}`);
         }
-  
+
         const data = await resp.json();
-        // console.log("RAG response:", data);
-  
+        
         const sources = Array.isArray(data.sources)
           ? data.sources
               .filter(s => s?.url)
               .map((s: any, i: number) => `[${i + 1}] ${s.url}`)
               .join("  ")
           : "";
-  
-        const final = sources
+
+        const finalContent = sources
           ? `${data.answer || "No answer"}\n\n## Sources\n${sources}`
           : (data.answer || "No relevant information found.");
-  
-        const botMessage: ChatMessage = {
-          id: `bot-${Date.now()}`,
-          content: final,
-          sender: "bot",
-          timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, botMessage]);
+
+        await simulateStreaming(botMessageId, finalContent);
       } else {
         const response = await apiService.chatMessage({
           message: userMessage.content,
@@ -399,45 +436,40 @@ export default function ChatbotPage() {
         
         const lines = response.reply.split("\n");
         
-        // Extract ticket info
         let tickets = lines
-        .map(line => {
-          const match = line.match(/\[ID:\s*([a-f0-9]+)\]/i);
-          if (match) {
-            const id = match[1];
-            const cleanLine = line.replace(/\[ID:.*?\]\s*/, ""); // remove [ID: ...]
-            return { id, text: cleanLine.trim() };
-          }
-          return null;
-        })
-        .filter(Boolean);
+          .map(line => {
+            const match = line.match(/\[ID:\s*([a-f0-9]+)\]/i);
+            if (match) {
+              const id = match[1];
+              const cleanLine = line.replace(/\[ID:.*?\]\s*/, "");
+              return { id, text: cleanLine.trim() };
+            }
+            return null;
+          })
+          .filter(Boolean);
         
-        // console.log(tickets);
-        if(tickets.length == 0) tickets = undefined;
-        const botMessage: ChatMessage = {
-          id: `bot-${Date.now()}`,
-          content: response.reply,
-          sender: "bot",
-          timestamp: new Date(),
-          tickets: tickets
-        };
+        if (tickets.length === 0) tickets = undefined;
         
-        setMessages(prev => [...prev, botMessage]);
+        await simulateStreaming(botMessageId, response.reply);
+        
+        if (tickets) {
+          setMessages(prev => prev.map(msg => 
+            msg.id === botMessageId 
+              ? { ...msg, tickets }
+              : msg
+          ));
+        }
       }
     } catch (e: any) {
       console.error("Chat error:", e);
-      const botMessage: ChatMessage = {
-        id: `bot-${Date.now()}`,
-        content: `## Error\n${e?.message || "Failed to process request"}`,
-        sender: "bot",
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, botMessage]);
+      const errorContent = `I encountered an error while processing your request. ${e?.message || "Please try again."}`;
+      await simulateStreaming(botMessageId, errorContent);
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
     }
   };
-  
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -445,103 +477,123 @@ export default function ChatbotPage() {
     }
   };
 
-  return (
-    <div className="h-full flex flex-col max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-          IT Support Assistant
-        </h1>
-        <p className="text-muted-foreground mt-2">
-          Get instant help with intelligent responses and ticket management
-        </p>
-      </div>
+  const quickActions = [
+    { label: "Reset Password", prompt: "I need to reset my password", icon: "🔐" },
+    { label: "Software Issue", prompt: "I'm having trouble with software installation", icon: "💻" },
+    { label: "Network Problem", prompt: "I'm experiencing network connectivity issues", icon: "🌐" },
+    { label: "Hardware Help", prompt: "I need help with hardware problems", icon: "🔧" },
+  ];
 
-      <Card className="flex-1 flex flex-col border-0 shadow-xl bg-white dark:bg-gray-950">
-        <CardHeader className="border-b border-gray-100 dark:border-gray-800 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-900 dark:to-gray-800">
-          <CardTitle className="flex items-center gap-3">
-            <div className="p-2 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
-              <Bot className="w-5 h-5 text-blue-600" />
-            </div>
-            <div className="flex-1">
-              <div className="font-semibold">IT Support Assistant</div>
-              <div className="text-sm text-muted-foreground font-normal">
-                Powered by AI • Always learning
+  return (
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Header */}
+      <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Avatar className="w-10 h-10 ring-2 ring-blue-500/20">
+                  <AvatarFallback className="bg-gradient-to-br from-blue-600 to-purple-600 text-white">
+                    <Bot className="w-5 h-5" />
+                  </AvatarFallback>
+                </Avatar>
+                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 border-2 border-white dark:border-gray-800 rounded-full"></div>
+              </div>
+              <div>
+                <h1 className="font-semibold text-lg text-gray-900 dark:text-gray-100">
+                  IT Support Assistant
+                </h1>
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <Sparkles className="w-4 h-4" />
+                  AI-powered • Always learning
+                </div>
               </div>
             </div>
+            
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              <Badge variant="secondary" className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+              <Badge variant="secondary" className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
                 Online
               </Badge>
+              <Button variant="ghost" size="sm">
+                <Settings className="w-4 h-4" />
+              </Button>
             </div>
-          </CardTitle>
-        </CardHeader>
+          </div>
+        </div>
+      </div>
 
-        <CardContent className="flex-1 flex flex-col p-0">
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 max-h-[65vh] bg-gradient-to-b from-gray-50/30 to-white dark:from-gray-900/30 dark:to-gray-950">
+      {/* Messages */}
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full overflow-y-auto">
+          <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`group flex gap-4 ${
-                  message.sender === "user" ? "justify-end" : "justify-start"
+                className={`flex gap-4 group ${
+                  message.sender === "user" ? "justify-end" : ""
                 }`}
               >
                 {message.sender === "bot" && (
                   <div className="flex-shrink-0">
-                    <Avatar className="w-10 h-10 shadow-md">
-                      <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
-                        <Bot className="w-5 h-5" />
+                    <Avatar className="w-8 h-8">
+                      <AvatarFallback className="bg-gradient-to-br from-blue-600 to-purple-600 text-white">
+                        <Bot className="w-4 h-4" />
                       </AvatarFallback>
                     </Avatar>
                   </div>
                 )}
 
-                <div
-                  className={`relative max-w-[80%] ${
-                    message.sender === "user"
-                      ? "ml-auto"
-                      : ""
-                  }`}
-                >
+                <div className={`flex-1 max-w-3xl ${message.sender === "user" ? "flex justify-end" : ""}`}>
                   <div
-                    className={`rounded-2xl px-4 py-3 shadow-sm ${
+                    className={`rounded-2xl px-4 py-3 ${
                       message.sender === "user"
-                        ? "bg-gradient-to-r from-blue-600 to-purple-600 text-white"
-                        : "bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700"
+                        ? "bg-blue-600 text-white max-w-lg ml-auto"
+                        : "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
                     }`}
                   >
-                    {message.tickets ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2 mb-3">
-                          <FileText className="w-4 h-4 text-blue-500" />
-                          <span className="font-medium text-sm">Related Tickets</span>
+                    {/* Streaming indicator */}
+                    {message.isStreaming && (
+                      <div className="flex items-center gap-2 mb-2 text-gray-500">
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-current rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                          <div className="w-2 h-2 bg-current rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                          <div className="w-2 h-2 bg-current rounded-full animate-bounce"></div>
                         </div>
-                        {message.tickets.map((ticket: any, idx: number) => (
-                          <div key={ticket.id || idx} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                        <span className="text-xs">AI is thinking...</span>
+                      </div>
+                    )}
+
+                    {/* Ticket Display */}
+                    {message.tickets && (
+                      <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                        <div className="flex items-center gap-2 mb-3">
+                          <FileText className="w-4 h-4 text-blue-600" />
+                          <span className="font-medium text-sm text-blue-800 dark:text-blue-200">
+                            Related Tickets
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          {message.tickets.map((ticket: any, idx: number) => (
                             <a
+                              key={ticket.id || idx}
                               href={`/dashboard/tickets/${ticket.id}`}
-                              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline font-medium transition-colors"
+                              className="block p-2 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-700 hover:border-blue-300 dark:hover:border-blue-600 transition-colors"
                             >
-                              {ticket.text}
+                              <span className="text-blue-700 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 text-sm font-medium">
+                                {ticket.text}
+                              </span>
                             </a>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      renderMessageContent(message)
-                    )}
-
-                    {message.ticketId && (
-                      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
-                        <Badge variant="outline" className="text-xs bg-blue-50 dark:bg-blue-900/30">
-                          <Ticket className="w-3 h-3 mr-1" />
-                          Ticket: {message.ticketId}
-                        </Badge>
+                          ))}
+                        </div>
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between mt-3 pt-2">
-                      <div className="flex items-center gap-1 text-xs opacity-70">
+                    {/* Message Content */}
+                    {renderMessageContent(message)}
+
+                    {/* Message Footer */}
+                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100 dark:border-gray-700">
+                      <div className="flex items-center gap-1 text-xs text-gray-400">
                         <Clock className="w-3 h-3" />
                         {message.timestamp.toLocaleTimeString([], {
                           hour: '2-digit',
@@ -549,19 +601,28 @@ export default function ChatbotPage() {
                         })}
                       </div>
 
-                      {message.sender === "bot" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="opacity-0 group-hover:opacity-100 transition-opacity h-6 px-2"
-                          onClick={() => copyMessage(message.content, message.id)}
-                        >
-                          {copiedMessageId === message.id ? (
-                            <Check className="w-3 h-3 text-green-500" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                        </Button>
+                      {message.sender === "bot" && !message.isStreaming && (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => copyMessage(message.content, message.id)}
+                          >
+                            {copiedMessageId === message.id ? (
+                              <Check className="w-3 h-3 text-green-500" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -569,99 +630,131 @@ export default function ChatbotPage() {
 
                 {message.sender === "user" && (
                   <div className="flex-shrink-0">
-                    <Avatar className="w-10 h-10 shadow-md">
+                    <Avatar className="w-8 h-8">
                       <AvatarFallback className="bg-gradient-to-br from-gray-600 to-gray-800 text-white">
-                        <User className="w-5 h-5" />
+                        <User className="w-4 h-4" />
                       </AvatarFallback>
                     </Avatar>
                   </div>
                 )}
               </div>
             ))}
-
-            {isLoading && (
-              <div className="flex gap-4 justify-start">
-                <Avatar className="w-10 h-10 shadow-md">
-                  <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
-                    <Bot className="w-5 h-5" />
-                  </AvatarFallback>
-                </Avatar>
-                <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl px-4 py-3 flex items-center gap-3 shadow-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    Processing your request...
-                  </span>
-                </div>
-              </div>
-            )}
             <div ref={messagesEndRef} />
           </div>
+        </div>
+      </div>
 
-          <div className="border-t border-gray-100 dark:border-gray-800 p-4 bg-white dark:bg-gray-950">
-            <div className="flex gap-3 mb-3">
-              <div className="flex-1 relative">
-                <Input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Describe your IT issue or ask for help..."
-                  className="pr-12 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  disabled={isLoading}
-                />
-                <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+      {/* Input Area */}
+      <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          {/* Quick Actions */}
+          {messages.length <= 1 && (
+            <div className="mb-4">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                Quick actions to get started:
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {quickActions.map((action) => (
                   <Button
-                    onClick={handleSendMessage}
-                    disabled={!input.trim() || isLoading}
-                    size="sm"
-                    className="h-8 w-8 p-0 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-md hover:shadow-lg transition-all duration-200"
+                    key={action.label}
+                    variant="outline"
+                    className="h-auto p-3 flex-col gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    onClick={() => setInput(action.prompt)}
                   >
-                    <Send className="w-4 h-4" />
+                    <span className="text-lg">{action.icon}</span>
+                    <span className="text-xs font-medium">{action.label}</span>
                   </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Input Container */}
+          <div className="relative">
+            <div className="flex gap-3">
+              <div className="flex-1 relative">
+                <div className="relative rounded-2xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Ask me anything about IT support..."
+                    className="w-full px-4 py-3 pr-16 bg-transparent border-none outline-none resize-none min-h-[52px] max-h-[200px] placeholder-gray-400 dark:placeholder-gray-500"
+                    disabled={isLoading}
+                    rows={1}
+                  />
+                  
+                  <div className="absolute right-2 bottom-2 flex items-center gap-2">
+                    {isStreaming && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0 text-red-500 hover:text-red-600"
+                        onClick={() => {
+                          setIsStreaming(false);
+                          setIsLoading(false);
+                        }}
+                      >
+                        <StopCircle className="w-4 h-4" />
+                      </Button>
+                    )}
+                    
+                    <Button
+                      onClick={handleSendMessage}
+                      disabled={!input.trim() || isLoading}
+                      size="sm"
+                      className="h-8 w-8 p-0 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
+                    >
+                      {isLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
+              {/* Attachments Toggle */}
               <Button
                 variant={answerFromAttachments ? "default" : "outline"}
                 size="sm"
                 className={`shrink-0 transition-all duration-200 ${
                   answerFromAttachments 
                     ? "bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white shadow-md" 
-                    : "hover:bg-gray-50 dark:hover:bg-gray-800"
+                    : "hover:bg-gray-50 dark:hover:bg-gray-700"
                 }`}
                 onClick={() => setAnswerFromAttachments(v => !v)}
                 disabled={isLoading}
-                title="When enabled, the assistant will answer using ticket attachments"
+                title="Search through ticket attachments"
               >
                 <Ticket className="h-4 w-4 mr-2" />
-                Attachments
+                {answerFromAttachments ? "RAG On" : "RAG Off"}
                 {answerFromAttachments && (
-                  <Badge className="ml-2 bg-white/20 text-white text-xs">ON</Badge>
+                  <div className="ml-2 w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                 )}
               </Button>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {[
-                { text: "Password Reset", prompt: "I need to reset my password" },
-                { text: "Software Help", prompt: "I need help installing software" },
-                { text: "Network Issues", prompt: "I'm having network connectivity issues" },
-                { text: "Hardware Problem", prompt: "I'm experiencing hardware issues" }
-              ].map((suggestion) => (
-                <Button
-                  key={suggestion.text}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setInput(suggestion.prompt)}
-                  disabled={isLoading}
-                  className="text-xs h-7 px-3 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-                >
-                  {suggestion.text}
-                </Button>
-              ))}
+            {/* Footer Text */}
+            <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
+              <div className="flex items-center gap-4">
+                <span>Press Enter to send, Shift+Enter for new line</span>
+                {answerFromAttachments && (
+                  <span className="text-green-600 dark:text-green-400">
+                    🔍 Searching attachments enabled
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <MessageSquare className="w-3 h-3" />
+                <span>AI Assistant v2.0</span>
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
