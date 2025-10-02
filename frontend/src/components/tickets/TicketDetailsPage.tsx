@@ -197,6 +197,7 @@ export default function TicketDetailsPage() {
   const userRole = localStorage.getItem("user_role");
   const userId = localStorage.getItem("user_id");
   const userDepartment = localStorage.getItem("user_department");
+  const userName = localStorage.getItem("user_name");
 
   // +++ Add below existing useState declarations +++
 const STATUS_OPTIONS = ['open', 'in_progress', 'resolved', 'closed'] as const;
@@ -757,7 +758,7 @@ const onSubmitStatus = async () => {
               )}
 
               {/* ADDED: Status dropdown + Complete button */}
-              {canEdit() && !['closed'].includes(ticket.status) && (
+              {canEdit() && (
                 <div className="flex items-center gap-2">
                   <label htmlFor="statusSelect" className="text-sm font-medium text-gray-700 block">Status</label>
                   <select
@@ -910,9 +911,6 @@ const onSubmitStatus = async () => {
               </div>
             </div>
 
-            {/* Manager/Admin-only fields */}
-            {(userRole === "manager" || userRole === "admin") && (
-              <>
                 <Separator />
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -935,7 +933,7 @@ const onSubmitStatus = async () => {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <Badge className={`${getStatusColor(ticket.status)} px-3 py-1`}>
+                        <Badge className={`${getStatusColor(ticket.status)} px-3 py-1 ml-3`}>
                           {ticket.status.replace("_", " ").toUpperCase()}
                         </Badge>
                       )}
@@ -945,16 +943,14 @@ const onSubmitStatus = async () => {
                       <Label htmlFor="assignee">Assigned To</Label>
                       <div className="flex items-center gap-2">
                         <User className="w-4 h-4 text-muted-foreground" />
-                        <span>{ticket.assignedTo?.name || "Unassigned"}</span>
+                        <span>{ticket.assignedTo?.name === userName ? "Me" : "Unassigned"}</span>
                       </div>
                     </div>
                   </div>
                 </div>
-              </>
-            )}
           </CardContent>
         </Card>
-        <Card className="shadow-sm border-gray-200 bg-white">
+        {/* <Card className="shadow-sm border-gray-200 bg-white">
           <CardHeader>
             <CardTitle className="text-lg">Current Status</CardTitle>
           </CardHeader>
@@ -968,7 +964,7 @@ const onSubmitStatus = async () => {
               </p>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
       </div >
 
       {/* Sidebar */}
