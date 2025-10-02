@@ -12,6 +12,7 @@ const {
 } = require('../middleware/authorizeAction');
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
+const {createStatusChangeNotifications} = require('./notifications');
 
 // Utility: Get number of tickets assigned to a user
 async function countTicketsAssignedToUser(userId) {
@@ -24,6 +25,11 @@ router.put('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const updates = { ...(req.body || {}) };
+    const oldTicket = await Ticket.findById(id)
+      .populate('createdBy', 'name email role department')
+      .populate('assignedTo', 'name email role department');
+    
+    if (!oldTicket) return res.status(404).json({ msg: 'not found' });
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ msg: 'invalid_id' });
@@ -57,6 +63,18 @@ router.put('/:id', authenticate, async (req, res) => {
     ticket.set({ ...updates, updatedAt: new Date() });
     await ticket.save();
 
+    // Check if status is being changed
+    const statusChanged = updates.status && updates.status !== oldTicket.status;
+    
+    // Apply updates
+    oldTicket.set({ ...updates, updatedAt: new Date() });
+    await oldTicket.save();
+    
+    // 🔔 SEND NOTIFICATIONS FOR STATUS CHANGES
+    if (statusChanged) {
+      await createStatusChangeNotifications(oldTicket, req.user, updates.status);
+    }
+    
     const updated = await Ticket.findById(id)
       .populate('createdBy', 'name email role department')
       .populate('assignedTo', 'name email role department')
@@ -179,8 +197,6 @@ router.get('/analytics/tags', authenticate, async (req, res) => {
 
     const totalTaggedTickets = analytics.reduce((sum, tag) => sum + tag.totalTickets, 0);
     if (totalTaggedTickets > deptTicketsCount) {
-      console.warn(`🚨 TAG OVERFLOW: ${totalTaggedTickets} > ${deptTicketsCount}`);
-
       const scaleFactor = deptTicketsCount / totalTaggedTickets;
       analytics.forEach(tag => {
         tag.totalTickets = Math.round(tag.totalTickets * scaleFactor);

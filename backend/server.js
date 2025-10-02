@@ -31,7 +31,7 @@ app.use('/api/auth', require('./routes/auth'));
 
 // Protected routes
 app.use('/api/tickets', authenticate, require('./routes/authTickets')); // Use the secure ticket routes
-app.use('/api/notifications', authenticate, require('./routes/notifications'));
+app.use('/api/notifications', authenticate, require('./routes/notifications').router);
 app.use('/api/gmail',  require('./routes/gmail'));
 app.use("/api/upload", authenticate, uploadRoutes);
 app.use("/api",employees)

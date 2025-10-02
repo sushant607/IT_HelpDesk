@@ -176,7 +176,69 @@ const createReminderNotification = async (userId, ticket, reminder, timeframe) =
   }
 };
 
-// Export the function for use by reminder service
-module.exports = router;
-module.exports.createReminderNotification = createReminderNotification;
+// Create Status Change Notifications
+const createStatusChangeNotifications = async (ticket, changedBy, newStatus) => {
+  try {
+    const Notification = require('../models/Notification');
+    const User = require('../models/User');
+    
+    const recipients = new Set(); // Use Set to avoid duplicates
+    
+    // Find department manager
+    const departmentManager = await User.findOne({
+      department: ticket.department,
+      role: 'manager'
+    });
+    
+    // Notification logic based on who changed the status
+    if (changedBy.role === 'employee') {
+      // Employee changed status → Notify manager
+      if (departmentManager && departmentManager._id.toString() !== changedBy.id) {
+        recipients.add(departmentManager._id.toString());
+      }
+      
+      // If employee is not the creator, notify creator too
+      if (ticket.createdBy && ticket.createdBy._id.toString() !== changedBy.id) {
+        recipients.add(ticket.createdBy._id.toString());
+      }
+    } else if (changedBy.role === 'manager') {
+      // Manager changed status → Notify assignee and creator
+      if (ticket.assignedTo && ticket.assignedTo._id.toString() !== changedBy.id) {
+        recipients.add(ticket.assignedTo._id.toString());
+      }
+      
+      if (ticket.createdBy && 
+          ticket.createdBy._id.toString() !== changedBy.id &&
+          ticket.createdBy._id.toString() !== ticket.assignedTo?._id.toString()) {
+        recipients.add(ticket.createdBy._id.toString());
+      }
+    }
+    
+    // Create notifications for all recipients
+    const notifications = Array.from(recipients).map(userId => ({
+      user: userId,
+      title: `Ticket Status Updated: ${ticket.title}`,
+      message: `${changedBy.name} changed ticket status to "${newStatus.toUpperCase()}"`,
+      type: 'status_change',
+      ticketId: ticket._id,
+      read: false
+    }));
+    
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+      console.log(`Created ${notifications.length} status change notifications`);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error creating status change notifications:', error);
+    // Don't throw - notifications shouldn't break ticket updates
+  }
+}
+
+module.exports = {
+  router,
+  createReminderNotification,
+  createStatusChangeNotifications
+};
+
 
