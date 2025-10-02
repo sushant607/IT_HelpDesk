@@ -55,8 +55,13 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     fetchTickets();
-    fetchAnalytics();
   }, []);
+
+  useEffect(() => {
+    if (tickets.length > 0) {
+      fetchAnalytics();
+    }
+  }, [tickets]);
 
   const fetchTickets = async () => {
     setLoadingTickets(true);
@@ -87,36 +92,36 @@ export default function EmployeeDashboard() {
   };
 
   const fetchAnalytics = async () => {
-    setLoadingAnalytics(true);
-    try {
-      const response = await fetch(
-        "http://localhost:5000/api/tickets/analytics/employee-tags?timeframe=30",
-        {
-          headers: {
-            Authorization: token ? `Bearer ${token}` : "",
-          },
-        }
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAnalytics(data);
-      } else {
-        console.error("Failed to fetch analytics:", response.statusText);
-        // Fallback analytics based on real tickets
-        if (tickets.length > 0) {
-          createFallbackTagAnalytics();
-        }
+  setLoadingAnalytics(true);
+  try {
+    const response = await fetch(
+      "http://localhost:5000/api/tickets/analytics/tags?timeframe=30",
+      {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
       }
-    } catch (error) {
-      console.error("Error fetching analytics:", error);
+    );
+    
+    if (response.ok) {
+      const data = await response.json();
+      setAnalytics(data);
+    } else {
+      console.error("❌ API FAILED:", response.status, response.statusText);
       if (tickets.length > 0) {
         createFallbackTagAnalytics();
       }
-    } finally {
-      setLoadingAnalytics(false);
     }
-  };
+  } catch (error) {
+    console.error("❌ API ERROR:", error);
+    console.log("ERROR FALLBACK - tickets length:", tickets.length);
+    if (tickets.length > 0) {
+      createFallbackTagAnalytics();
+    }
+  } finally {
+    setLoadingAnalytics(false);
+  }
+};
 
   // Create tag analytics from actual ticket data if API fails
   const createFallbackTagAnalytics = () => {
@@ -130,6 +135,8 @@ export default function EmployeeDashboard() {
           tagGroups[tag] = {
             tag,
             totalTickets: 0,
+            departmentTickets: 0,
+            myTickets: 0,
             statusBreakdown: {},
             priorityBreakdown: {},
             recentTickets: []
@@ -137,6 +144,13 @@ export default function EmployeeDashboard() {
         }
         
         tagGroups[tag].totalTickets++;
+
+        if (ticket.createdBy?.id === userId) {
+          tagGroups[tag].myTickets++;
+        } else if (ticket.department === userDepartment) {
+          tagGroups[tag].departmentTickets++;
+        }
+
         tagGroups[tag].statusBreakdown[ticket.status] = (tagGroups[tag].statusBreakdown[ticket.status] || 0) + 1;
         tagGroups[tag].priorityBreakdown[ticket.priority] = (tagGroups[tag].priorityBreakdown[ticket.priority] || 0) + 1;
       });
@@ -147,6 +161,8 @@ export default function EmployeeDashboard() {
       summary: {
         totalTags: Object.keys(tagGroups).length,
         totalTickets: tickets.length,
+        departmentTickets: tickets.filter(t => t.department === userDepartment && t.createdBy?.id !== userId).length,
+        myTickets: tickets.filter(t => t.createdBy?.id === userId).length,
         timeframe: 30,
         generatedAt: new Date().toISOString()
       },
@@ -278,8 +294,9 @@ export default function EmployeeDashboard() {
             <div className="text-2xl font-bold">{analytics?.summary.totalTickets || stats.total}</div>
             <p className="text-xs text-muted-foreground">
               {analytics ? 
-                `${analytics.summary.myTickets} mine${analytics.summary.departmentTickets > 0 ? ` + ${analytics.summary.departmentTickets} dept` : ''}` 
-                : 'All time'}
+                `${analytics.summary.myTickets} mine + ${analytics.summary.departmentTickets} others` : 
+                'Department + your created tickets (last 30 days)'
+              }
             </p>
           </CardContent>
         </Card>
@@ -321,7 +338,6 @@ export default function EmployeeDashboard() {
       {/* Analytics Charts Section */}
       {analytics && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Department + Employee Tag Distribution */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -350,28 +366,37 @@ export default function EmployeeDashboard() {
                     return (
                       <div key={tagName} className="space-y-2">
                         <div className="flex justify-between items-center">
-                          {!isOthersCategory && originalTagData && (
-                            <div className="flex gap-1 text-xs">
-                              <span className="text-blue-600">Dept: {originalTagData.departmentTickets}</span>
-                              <span className="text-purple-600">Mine: {originalTagData.myTickets}</span>
-                            </div>
-                          )}
-                          <span className="text-sm text-muted-foreground">
-                            {totalCount} total ({Math.round((Number(totalCount) / Number(analytics.summary.totalTickets)) * 100)}%)
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <Badge className={getTagColor(tagName, index)}>
+                              <Hash className="w-3 h-3 mr-1" />
+                              {tagName}
+                              {isOthersCategory && ` (${analytics.tags.length - 5} tags)`}
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            {!isOthersCategory && originalTagData && (
+                              <div className="flex gap-1 text-xs">
+                                <span className="text-blue-600">Dept: {originalTagData.departmentTickets}</span>
+                                <span className="text-purple-600">Mine: {originalTagData.myTickets}</span>
+                              </div>
+                            )}
+                            <span className="text-sm text-muted-foreground">
+                              {totalCount} total ({((Number(totalCount) / analytics.tags.reduce((sum, tag) => sum + tag.totalTickets, 0)) * 100).toFixed(1)}%)
+                            </span>
+                          </div>
                         </div>
-                        
-                        {/* Progress bar with unique colors */}
+
                         <div className="w-full bg-muted rounded-full h-2">
                           <div
                             className={`rounded-full h-2 transition-all duration-500 ${getProgressBarColor(tagName, index)}`}
                             style={{
-                              width: `${(Number(totalCount) / Number(analytics.summary.totalTickets)) * 100}%`
+                              width: `${(Number(totalCount) / analytics.tags.reduce((sum, tag) => sum + tag.totalTickets, 0)) * 100}%`
                             }}
                           />
                         </div>
                         
-                        {/* Status breakdown badges - only for real tags, not Others */}
+                        {/* Status breakdown badges */}
                         {!isOthersCategory && originalTagData && (
                           <div className="flex flex-wrap gap-1">
                             {Object.entries(originalTagData.statusBreakdown || {}).map(([status, count]) => (
@@ -412,21 +437,23 @@ export default function EmployeeDashboard() {
                 Priority Distribution
               </CardTitle>
               <CardDescription>
-                Breakdown by priority levels
+                Your tickets breakdown by priority
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 {['urgent', 'high', 'medium', 'low'].map(priority => {
-                  const total = analytics?.tags.reduce((sum, tag) => 
-                    sum + (tag.priorityBreakdown?.[priority] || 0), 0
-                  ) || 0;
+                  const total = analytics?.tags.reduce((sum, tag) => {
+                    const priorityCount = tag.priorityBreakdown?.[priority] || 0;
+                    const myPortion = tag.myTickets > 0 ? 
+                      Math.round(priorityCount * (tag.myTickets / tag.totalTickets)) : 0;
+                    return sum + myPortion;
+                  }, 0) || 0;
                   
                   if (total === 0) return null;
                   
-                  const percentage = analytics?.summary.totalTickets 
-                    ? (total / analytics.summary.totalTickets) * 100 
-                    : 0;
+                  const myTotalTickets = analytics?.summary?.myTickets  || 1;
+                  const percentage = (total / myTotalTickets) * 100;
                   
                   return (
                     <div key={priority} className="space-y-2">

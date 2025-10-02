@@ -123,7 +123,7 @@ export default function ManagerDashboard() {
     setLoadingAnalytics(true);
     try {
       const response = await fetch(
-        "http://localhost:5000/api/tickets/analytics/manager-tags?timeframe=30",
+        "http://localhost:5000/api/tickets/analytics/tags?timeframe=30",
         {
           headers: {
             Authorization: token ? `Bearer ${token}` : "",
@@ -421,12 +421,6 @@ export default function ManagerDashboard() {
           </p>
         </div>
         <div className="flex gap-3">
-          {/* <Button
-            variant="outline"
-            onClick={() => navigate("/all-tickets")}
-          >
-            View All Tickets
-          </Button> */}
           <Button
             onClick={() => navigate("/tickets/new")}
             className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
@@ -445,7 +439,7 @@ export default function ManagerDashboard() {
             <Ticket className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.total}</div>
+            <div className="text-2xl font-bold">{analytics?.summary.totalTickets || stats.total}</div>
             <p className="text-xs text-muted-foreground">
               {analytics ? `${analytics.summary.departmentTickets} dept + ${analytics.summary.myTickets} mine` : 'Department & mine'}
             </p>
@@ -544,7 +538,7 @@ export default function ManagerDashboard() {
                           )}
                         </div>
                         <span className="text-sm text-muted-foreground">
-                          {totalCount} total ({Math.round((Number(totalCount) / Number(analytics.summary.totalTickets)) * 100)}%)
+                          {totalCount} total ({((Number(totalCount) / Number(analytics.summary.totalTickets)) * 100).toFixed(1)}%)
                         </span>
                       </div>
                       
