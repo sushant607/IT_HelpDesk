@@ -14,7 +14,7 @@ router.post('/',  async (req, res) => {
     }
 
     const collection = await getCollection();
-    console.log(collection);
+    // console.log(collection);
     await collection.add({
       ids,
       documents,
