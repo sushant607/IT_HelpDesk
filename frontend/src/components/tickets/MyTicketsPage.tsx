@@ -732,7 +732,7 @@ export default function MyTicketsPage() {
                 {/* Enhanced Action Buttons */}
                 <div className="flex gap-3 justify-end pt-2">
                   {/* Employee Set Reminder Button */}
-                  {(currentUser?.role === 'employee' && 
+                  {(currentUser?.role === 'employee' && !['closed', 'resolved'].includes(ticket.status) && 
                     (ticket.createdByName === currentUser.name || 
                     ticket.assignedTo?.name === currentUser.name ||
                     ticket.createdByName === currentUser.name)) && (
@@ -769,7 +769,7 @@ export default function MyTicketsPage() {
                     className="hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 transition-colors"
                   >
                     <Eye className="w-4 h-4 mr-2" />
-                    {(isManager || ticket.createdByName === currentUser?.name || ticket.assignedTo?.name === currentUser?.name) 
+                    {(!['closed', 'resolved'].includes(ticket.status) && (isManager || ticket.createdByName === currentUser?.name || ticket.assignedTo?.name === currentUser?.name)) 
                       ? 'Edit Details' 
                       : 'View Details'
                     }

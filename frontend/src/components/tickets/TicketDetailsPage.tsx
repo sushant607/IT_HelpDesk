@@ -50,6 +50,7 @@ interface TicketData {
   attachments: Attachment[];
   createdAt: string;
   updatedAt: string;
+  tags: [string];
 }
 
 interface FormData {
@@ -721,71 +722,76 @@ const onSubmitStatus = async () => {
 };
 
  return (
-  <div className="space-y-6 max-w-4xl">
+  <div className="min-h-screen bg-gray-50/30">
+    <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
     {/* Header */}
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back
-        </Button>
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight">{ticket.title}</h1>
-            <Badge variant="outline" className="text-sm">
-              {ticket._id.slice(-8).toUpperCase()}
-            </Badge>
-          </div>
-          <p className="text-muted-foreground mt-2">
-            Ticket details and status information
-          </p>
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-10 -mx-6 mb-8">
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
+
+            <div className="flex items-center gap-4">
+              <Button variant="outline" size="sm" onClick={() => navigate(-1)}>
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back
+              </Button>
+              <div>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-3xl font-bold tracking-tight">{ticket.title}</h1>
+                  <Badge variant="outline" className="text-sm">
+                    {ticket._id.slice(-8).toUpperCase()}
+                  </Badge>
+                </div>
+                <p className="text-muted-foreground mt-2">
+                  Ticket details and status information
+                </p>
+              </div>
+            </div>
+
+            {/* Right header actions */}
+            <div className="flex items-center gap-3">
+              {canEdit() && !isEditing && !['closed'].includes(ticket.status) && (
+                <Button onClick={handleEdit} className="bg-gradient-primary hover:shadow-glow">
+                  <Edit className="w-4 h-4 mr-2" />
+                  Edit Ticket
+                </Button>
+              )}
+
+              {/* ADDED: Status dropdown + Complete button */}
+              {canEdit() && !['closed'].includes(ticket.status) && (
+                <div className="flex items-center gap-2">
+                  <label htmlFor="statusSelect" className="text-sm font-medium text-gray-700 block">Status</label>
+                  <select
+                    id="statusSelect"
+                    className="border rounded-md px-2 py-1 text-sm bg-background"
+                    value={statusDraft}
+                    onChange={(e) => setStatusDraft(e.target.value as any)}
+                  >
+                    <option value="open">Open</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="resolved">Resolved</option>
+                    {(userRole === 'manager' || userRole === 'admin') && (
+                      <option value="closed">Closed</option>
+                    )}
+                  </select>
+                  <Button
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700"
+                    onClick={onSubmitStatus}
+                    disabled={saving || (ticket && statusDraft === ticket.status)}
+                    title="Update ticket status"
+                  >
+                    {saving ? 'Updating' : 'Update Status'}
+                  </Button>
+                </div>)}
+                </div>
+            </div>
         </div>
       </div>
 
-      {/* Right header actions */}
-      <div className="flex items-center gap-3">
-        {canEdit() && !isEditing && (
-          <Button onClick={handleEdit} className="bg-gradient-primary hover:shadow-glow">
-            <Edit className="w-4 h-4 mr-2" />
-            Edit Ticket
-          </Button>
-        )}
-
-        {/* ADDED: Status dropdown + Complete button */}
-        {canEdit() && (<div className="flex items-center gap-2">
-          <label htmlFor="statusSelect" className="text-sm text-muted-foreground">Status</label>
-          <select
-            id="statusSelect"
-            className="border rounded-md px-2 py-1 text-sm bg-background"
-            value={statusDraft}
-            onChange={(e) =>
-              setStatusDraft(
-                e.target.value as 'open' | 'in_progress' | 'resolved' | 'closed'
-              )
-            }
-          >
-            {(['open','in_progress','resolved','closed'] as const).map(s => (
-              <option key={s} value={s}>{s.replace('_', ' ')}</option>
-            ))}
-          </select>
-          <Button
-            size="sm"
-            className="bg-green-600 hover:bg-green-700"
-            onClick={onSubmitStatus}
-            disabled={saving || (ticket && statusDraft === ticket.status)}
-            title="Apply selected status"
-          >
-            {saving ? 'Saving…' : 'Complete'}
-          </Button>
-        </div>)}
-        {/* END ADDED */}
-      </div>
-    </div>
-
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
       {/* Main Content - keeping your existing structure */}
-      <div className="lg:col-span-2 space-y-6">
-        <Card className="bg-gradient-card border-0 shadow-lg">
+      <div className="xl:col-span-3 space-y-8">
+        <Card className="shadow-sm border-gray-200 bg-white">
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Ticket Information</CardTitle>
@@ -803,7 +809,7 @@ const onSubmitStatus = async () => {
               )}
             </div>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="p-8 space-y-8">
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -811,7 +817,7 @@ const onSubmitStatus = async () => {
             )}
 
             {/* Title */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <Label htmlFor="title">Title</Label>
               {isEditing ? (
                 <Input
@@ -828,7 +834,7 @@ const onSubmitStatus = async () => {
             <Separator />
 
             {/* Description */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <Label htmlFor="description">Description</Label>
               {isEditing ? (
                 <Textarea
@@ -839,7 +845,7 @@ const onSubmitStatus = async () => {
                   disabled={isLoading}
                 />
               ) : (
-                <div className="bg-muted/30 p-4 rounded-lg">
+                <div className="bg-gray-50 border rounded-lg p-6">
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">
                     {ticket.description}
                   </p>
@@ -849,7 +855,7 @@ const onSubmitStatus = async () => {
 
             {/* Department and Priority */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label htmlFor="department">Department</Label>
                 <div className="flex items-center gap-2">
                   <Building2 className="w-4 h-4 text-muted-foreground" />
@@ -857,7 +863,7 @@ const onSubmitStatus = async () => {
                 </div>
               </div>
               
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label htmlFor="priority">Priority</Label>
                 {isEditing ? (
                   <Select
@@ -886,9 +892,9 @@ const onSubmitStatus = async () => {
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <Label htmlFor="tags">Tags</Label>
-              <div className="bg-muted/30 p-4 rounded-lg">
+              <div className="bg-gray-50 border rounded-lg p-6">
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">
                   {ticket.tags && ticket.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
@@ -910,7 +916,7 @@ const onSubmitStatus = async () => {
                 <Separator />
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <Label htmlFor="status">Status</Label>
                       {isEditing ? (
                         <Select
@@ -935,7 +941,7 @@ const onSubmitStatus = async () => {
                       )}
                     </div>
                     
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <Label htmlFor="assignee">Assigned To</Label>
                       <div className="flex items-center gap-2">
                         <User className="w-4 h-4 text-muted-foreground" />
@@ -948,11 +954,26 @@ const onSubmitStatus = async () => {
             )}
           </CardContent>
         </Card>
+        <Card className="shadow-sm border-gray-200 bg-white">
+          <CardHeader>
+            <CardTitle className="text-lg">Current Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-center space-y-3">
+              <Badge className={`${getStatusColor(ticket.status)} px-4 py-2 text-sm`}>
+                {ticket.status.replace("_", " ").toUpperCase()}
+              </Badge>
+              <p className="text-xs text-muted-foreground">
+                Last updated: {new Date(ticket.updatedAt).toLocaleDateString()}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       </div >
 
       {/* Sidebar */}
-      <div className="space-y-6">
-        <Card className="bg-gradient-card border-0 shadow-lg">
+      <div className="xl:col-span-1 space-y-6">
+        <Card className="shadow-sm border-gray-200 bg-white">
           <CardHeader>
             <CardTitle className="text-lg">Details</CardTitle>
           </CardHeader>
@@ -990,7 +1011,7 @@ const onSubmitStatus = async () => {
         </Card>
 
         {/* Comments Section */}
-        <Card className="bg-gradient-card border-0 shadow-lg">
+        <Card className="shadow-sm border-gray-200 bg-white">
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -1033,7 +1054,7 @@ const onSubmitStatus = async () => {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">No comments yet</p>
+              <p className="text-sm font-medium text-gray-700 mb-3 block text-center py-4">No comments yet</p>
             )}
             
             {/* Add new comment */}
@@ -1065,7 +1086,7 @@ const onSubmitStatus = async () => {
         </Card>
 
         {/* ENHANCED: Attachments Section with File Type Information */}
-        <Card className="bg-gradient-card border-0 shadow-lg">
+        <Card className="shadow-sm border-gray-200 bg-white">
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -1116,7 +1137,7 @@ const onSubmitStatus = async () => {
 
             {/* Existing attachments */}
             {ticket.attachments && ticket.attachments.length > 0 ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {ticket.attachments.map((attachment) => (
                   <div key={attachment._id} className="flex items-center justify-between border border-muted rounded-lg p-2 hover:bg-muted/50 transition-colors duration-200">
                     <a
@@ -1142,11 +1163,11 @@ const onSubmitStatus = async () => {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">No attachments</p>
+              <p className="text-sm font-medium text-gray-700 mb-3 block text-center py-4">No attachments</p>
             )}
             
             {/* ENHANCED: Upload new files with file type restrictions */}
-            {canEdit() && (
+            {canEdit() && !['closed'].includes(ticket.status) && (
               <>
                 <Separator />
                 <div className="space-y-3">
@@ -1189,7 +1210,7 @@ const onSubmitStatus = async () => {
                   />
                   
                   {selectedFiles && selectedFiles.length > 0 && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <p className="text-xs text-muted-foreground">
                         Selected files ({selectedFiles.length}):
                       </p>
@@ -1221,24 +1242,9 @@ const onSubmitStatus = async () => {
             )}
           </CardContent>
         </Card>
-
-        <Card className="bg-gradient-card border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="text-lg">Current Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-center space-y-3">
-              <Badge className={`${getStatusColor(ticket.status)} px-4 py-2 text-sm`}>
-                {ticket.status.replace("_", " ").toUpperCase()}
-              </Badge>
-              <p className="text-xs text-muted-foreground">
-                Last updated: {new Date(ticket.updatedAt).toLocaleDateString()}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
-  </div>
+    </div>
+  </div>  
 );
 }
