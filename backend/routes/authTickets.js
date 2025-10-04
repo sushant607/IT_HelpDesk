@@ -657,6 +657,30 @@ router.post('/', authenticate, async (req, res) => {
       if (!assigneeExists) {
         return res.status(400).json({ msg: 'assignee not found' });
       }
+
+      // Tag keywords mapping
+      const tagKeywords = {
+        'VPN': ['vpn', 'virtual private network', 'remote access'],
+        'Database': ['database', 'sql', 'mysql', 'postgres', 'db', 'query'],
+        'Installation': ['install', 'installation', 'setup', 'configure', 'deployment'],
+        'General': ['general', 'other', 'misc', 'question', 'help'],
+        'Wifi/Ethernet': ['wifi', 'wireless', 'ethernet', 'network', 'connection', 'internet'],
+        'Authentication': ['login', 'password', 'authenticate', 'authentication', 'access', 'permission']
+      };
+
+      // Find matching tags
+      const matchedTags = Object.entries(tagKeywords)
+        .filter(([tag, keywords]) =>
+          keywords.some(keyword => description.includes(keyword))
+        )
+        .map(([tag]) => tag);
+
+      // Always suggest at least 'General' if nothing matches
+      if (matchedTags.length === 0) matchedTags.push('General');
+
+      // Limit to max 3 tags
+      const suggestedTags = matchedTags.slice(0, 3);
+
       // Create ticket (Model.create triggers save middleware)
       const doc = await Ticket.create({
         title,
@@ -665,7 +689,7 @@ router.post('/', authenticate, async (req, res) => {
         createdBy: targetUserId, // storing "created for" per existing field naming
         assignedTo: finalAssignedTo,
         department: targetUser.department,
-        tags,
+        tags: suggestedTags,
         status: 'open',
         comments,
         attachments
