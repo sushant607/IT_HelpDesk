@@ -758,7 +758,7 @@ const onSubmitStatus = async () => {
               )}
 
               {/* ADDED: Status dropdown + Complete button */}
-              {canEdit() && (
+              {canEdit() && (userRole === 'manager' || !['closed'].includes(ticket.status)) && (
                 <div className="flex items-center gap-2">
                   <label htmlFor="statusSelect" className="text-sm font-medium text-gray-700 block">Status</label>
                   <select

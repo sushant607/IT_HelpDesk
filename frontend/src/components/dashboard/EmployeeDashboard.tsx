@@ -686,9 +686,9 @@ export default function EmployeeDashboard() {
 
                         {/* Smart Single Button - Edit OR View Details */}
                         <div className="flex-shrink-0">
-                          {canEdit ? (
-                            <Button
-                              variant="outline"
+                          {canEdit && !['closed'].includes(ticket.status) ? (
+                            <Button 
+                              variant="outline" 
                               size="sm"
                               className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200 hover:border-green-300"
                               onClick={() => navigate(`/dashboard/tickets/${ticket._id}`)}

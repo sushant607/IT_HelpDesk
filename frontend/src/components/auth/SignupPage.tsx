@@ -354,7 +354,6 @@ export default function SignupPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="department" className="text-gray-700">Department</Label>
                       <div className="relative">
@@ -404,7 +403,7 @@ export default function SignupPage() {
                       </Select>
 
                       {/* Show selected skills as removable badges */}
-                      <div className="flex flex-wrap gap-2 mt-2">
+                      <div className={formData.skills.length>0 ? "flex flex-wrap gap-2 mt-2" : "space-y-2"}>
                         {formData.skills.map((skill) => (
                           <div
                             key={skill}
@@ -448,7 +447,6 @@ export default function SignupPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="password" className="text-gray-700">Password</Label>
