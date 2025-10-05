@@ -686,89 +686,99 @@ router.get("/", authenticate, async (req, res) => {
 });
 
 // POST /api/tickets
-router.post("/", authenticate, async (req, res) => {
-  try {
-    const {
-      title,
-      description = "",
-      priority,
-      createdForUserId,
-      assignedTo,
-      comments,
-      attachments,
-    } = req.body || {};
-    const role = req.user.role;
-    const tags = req.body.tags;
-    // Basic input checks
-    if (!title || !priority) {
-      return res.status(400).json({ msg: "title and priority required" });
-    }
-    // Target user (defaults to self)
-    const targetUserId = createdForUserId || req.user.id;
-
-    // Determine final assignee per role policy
-    let finalAssignedTo;
-    if (role === "employee") {
-      // Employees cannot select assignee; force to self
-      finalAssignedTo = req.user.id;
-    } else {
-      // Admin/other privileged roles must provide assignedTo
-      if (!assignedTo) {
-        return res
-          .status(400)
-          .json({ msg: "assignedTo is required for this role" });
+router.post('/', authenticate, async (req, res) => {
+    try {
+      const { title, description = '', priority, createdForUserId, assignedTo,comments,attachments } = req.body || {};
+      const role = req.user.role;
+      const tags = req.body.tags;
+      // Basic input checks
+      if (!title || !priority) {
+        return res.status(400).json({ msg: 'title and priority required' });
       }
-      finalAssignedTo = assignedTo;
-    }
+      // Target user (defaults to self)
+      const targetUserId = createdForUserId || req.user.id;
+  
+      // Determine final assignee per role policy
+      let finalAssignedTo;
+      if (role === 'employee') {
+        // Employees cannot select assignee; force to self
+        finalAssignedTo = req.user.id;
+      } else {
+        // Admin/other privileged roles must provide assignedTo
+        if (!assignedTo) {
+          return res.status(400).json({ msg: 'assignedTo is required for this role' });
+        }
+        finalAssignedTo = assignedTo;
+      }
+  
+      // Authorization check against policy (server-side)
+      const { allowed, reason } = await canCreateTicket(req, targetUserId, finalAssignedTo);
+      if (!allowed) {
+        return res.status(403).json({ msg: reason });
+      }
+  
+      // Validate target user and get department
+      const targetUser = await User.findById(targetUserId).select('department');
+      if (!targetUser) {
+        return res.status(400).json({ msg: 'target user not found' });
+      }
+      if (!targetUser.department) {
+        return res.status(400).json({ msg: 'target user missing department' });
+      }
+  
+      // Optional: ensure assignee exists
+      const assigneeExists = await User.exists({ _id: finalAssignedTo });
+      if (!assigneeExists) {
+        return res.status(400).json({ msg: 'assignee not found' });
+      }
 
-    // Authorization check against policy (server-side)
-    const { allowed, reason } = await canCreateTicket(
-      req,
-      targetUserId,
-      finalAssignedTo
-    );
-    if (!allowed) {
-      return res.status(403).json({ msg: reason });
-    }
+      // Tag keywords mapping
+      const tagKeywords = {
+        'VPN': ['vpn', 'virtual private network', 'remote access'],
+        'Database': ['database', 'sql', 'mysql', 'postgres', 'db', 'query'],
+        'Installation': ['install', 'installation', 'setup', 'configure', 'deployment'],
+        'General': ['general', 'other', 'misc', 'question', 'help'],
+        'Wifi/Ethernet': ['wifi', 'wireless', 'ethernet', 'network', 'connection', 'internet'],
+        'Authentication': ['login', 'password', 'authenticate', 'authentication', 'access', 'permission']
+      };
 
-    // Validate target user and get department
-    const targetUser = await User.findById(targetUserId).select("department");
-    if (!targetUser) {
-      return res.status(400).json({ msg: "target user not found" });
-    }
-    if (!targetUser.department) {
-      return res.status(400).json({ msg: "target user missing department" });
-    }
+      // Find matching tags
+      const matchedTags = Object.entries(tagKeywords)
+        .filter(([tag, keywords]) =>
+          keywords.some(keyword => description.includes(keyword))
+        )
+        .map(([tag]) => tag);
 
-    // Optional: ensure assignee exists
-    const assigneeExists = await User.exists({ _id: finalAssignedTo });
-    if (!assigneeExists) {
-      return res.status(400).json({ msg: "assignee not found" });
-    }
-    // Create ticket (Model.create triggers save middleware)
-    const doc = await Ticket.create({
-      title,
-      description,
-      priority,
-      createdBy: targetUserId, // storing "created for" per existing field naming
-      assignedTo: finalAssignedTo,
-      department: targetUser.department,
-      tags,
-      status: "open",
-      comments,
-      attachments,
-    });
-    // console.log(doc)
-    return res.status(201).json({
-      ticket_id: doc._id,
-      message: "Ticket created and assigned successfully",
-    });
-  } catch (e) {
-    console.error("POST /tickets error:", e);
-    return res.status(500).json({ msg: "create_error" });
-  }
-});
+      // Always suggest at least 'General' if nothing matches
+      if (matchedTags.length === 0) matchedTags.push('General');
 
+      // Limit to max 3 tags
+      const suggestedTags = matchedTags.slice(0, 3);
+
+      // Create ticket (Model.create triggers save middleware)
+      const doc = await Ticket.create({
+        title,
+        description,
+        priority,
+        createdBy: targetUserId, // storing "created for" per existing field naming
+        assignedTo: finalAssignedTo,
+        department: targetUser.department,
+        tags: suggestedTags,
+        status: 'open',
+        comments,
+        attachments
+      });
+      // console.log(doc)
+      return res.status(201).json({
+        ticket_id: doc._id,
+        message: 'Ticket created and assigned successfully',
+      });
+    } catch (e) {
+      console.error('POST /tickets error:', e);
+      return res.status(500).json({ msg: 'create_error' });
+    }
+  });
+    
 // PATCH /api/tickets/:id
 router.patch("/:id", authenticate, async (req, res) => {
   try {
