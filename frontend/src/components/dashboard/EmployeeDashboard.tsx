@@ -50,6 +50,8 @@ export default function EmployeeDashboard() {
   const [userSkills, setUserSkills] = useState<string[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState("");
+  const [isAddingSkill, setIsAddingSkill] = useState(false);
+
   const userDepartment = localStorage.getItem("user_department") || "";
   const navigate = useNavigate();
 
@@ -312,7 +314,6 @@ export default function EmployeeDashboard() {
         </Button>
       </div>
       <Card>
-        { /* employee Skills Section */}
         <CardHeader>
           <CardTitle>My Skills</CardTitle>
           <CardDescription>Your registered skill set</CardDescription>
@@ -323,60 +324,14 @@ export default function EmployeeDashboard() {
             <p>Loading skills...</p>
           ) : (
             <>
-              <div className="flex gap-2 mb-4">
-                <select
-                  value={selectedSkill}
-                  onChange={(e) => setSelectedSkill(e.target.value)}
-                  className="border border-gray-300 rounded-md px-3 py-2 text-sm"
-                >
-                  <option value="">Select a skill</option>
-                  {[
-                    "troubleshooting",
-                    "networking",
-                    "operating systems",
-                    "hardware support",
-                    "software installation",
-                    "database basics",
-                    "ticketing systems",
-                    "customer support",
-                    "communication",
-                  ].map((skill) => (
-                    <option key={skill} value={skill}>
-                      {skill}
-                    </option>
-                  ))}
-                </select>
-
-                <Button
-                  onClick={async () => {
-                    if (!selectedSkill) return;
-                    const response = await fetch("http://localhost:5000/api/tickets/skills/add", {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        Authorization: token ? `Bearer ${token}` : "",
-                      },
-                      body: JSON.stringify({ skill: selectedSkill }),
-                    });
-                    if (response.ok) {
-                      const data = await response.json();
-                      setUserSkills(data.skills);
-                      setSelectedSkill("");
-                    }
-                  }}
-                  size="sm"
-                  className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
-                >
-                  Add Skill
-                </Button>
-              </div>
-
-              {userSkills.length > 0 ? (
-                <div className="flex flex-wrap gap-3">
-                  {userSkills.map((skill) => (
+              {/* Horizontal Skill Bar */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-2">
+                {userSkills.length > 0 ? (
+                  userSkills.map((skill) => (
                     <div
                       key={skill}
-                      className="relative group inline-flex items-center bg-blue-100 text-blue-900 text-base px-4 py-2 font-semibold rounded-lg transition-colors duration-200"
+                      className="relative group inline-flex items-center bg-blue-100 text-blue-900 
+                         text-sm px-3 py-1 rounded-lg shrink-0 transition-colors duration-200"
                     >
                       {skill}
                       <button
@@ -394,27 +349,94 @@ export default function EmployeeDashboard() {
                             setUserSkills(data.skills);
                           }
                         }}
-                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gray-300 text-gray-700 
-           text-[10px] flex items-center justify-center font-bold opacity-0 
-           group-hover:opacity-100 transition-all duration-200 hover:bg-gray-500 hover:text-white"
-
-
+                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gray-300 text-gray-700
+                           text-[10px] flex items-center justify-center font-bold opacity-0
+                           group-hover:opacity-100 transition-all duration-200 
+                           hover:bg-gray-500 hover:text-white"
                       >
                         ×
                       </button>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-muted-foreground">No skills found</p>
-              )}
+                  ))
+                ) : (
+                  <p className="text-muted-foreground">No skills found</p>
+                )}
 
+                {/* Add Skill Button / Dropdown */}
+                {!isAddingSkill ? (
+                  <Button
+                    size="sm"
+                    onClick={() => setIsAddingSkill(true)}
+                    className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
+                  >
+                    + Add
+                  </Button>
+                ) : (
+                  <div
+                    className="flex items-center gap-2 shrink-0 transition-all duration-300 ease-in-out"
+                  >
+                    <select
+                      value={selectedSkill}
+                      onChange={(e) => setSelectedSkill(e.target.value)}
+                      className="border border-gray-300 rounded-md px-2 py-1 text-sm"
+                    >
+                      <option value="">Select a skill</option>
+                      {[
+                        "troubleshooting",
+                        "networking",
+                        "operating systems",
+                        "hardware support",
+                        "software installation",
+                        "database basics",
+                        "ticketing systems",
+                        "customer support",
+                        "communication",
+                      ].map((skill) => (
+                        <option key={skill} value={skill}>
+                          {skill}
+                        </option>
+                      ))}
+                    </select>
 
+                    {/* Confirm & Cancel Buttons */}
+                    <Button
+                      size="sm"
+                      className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
+                      onClick={async () => {
+                        if (!selectedSkill) return;
+                        const response = await fetch("http://localhost:5000/api/tickets/skills/add", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            Authorization: token ? `Bearer ${token}` : "",
+                          },
+                          body: JSON.stringify({ skill: selectedSkill }),
+                        });
+                        if (response.ok) {
+                          const data = await response.json();
+                          setUserSkills(data.skills);
+                          setSelectedSkill("");
+                          setIsAddingSkill(false);
+                        }
+                      }}
+                    >
+                      <span className="text-white">&#10003;</span>
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
+                      onClick={() => setIsAddingSkill(false)}
+                    >
+                      <span className="text-white">✕</span> 
+                    </Button>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </CardContent>
-
-
       </Card>
 
       {/* Stats Cards */}
