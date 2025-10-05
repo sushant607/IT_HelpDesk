@@ -35,7 +35,7 @@ interface AnalyticsResponse {
     totalTags: number;
     totalTickets: number;
     departmentTickets: number;
-    myTickets: number; 
+    myTickets: number;
     timeframe: number;
     generatedAt: string;
   };
@@ -47,9 +47,12 @@ export default function EmployeeDashboard() {
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [userSkills, setUserSkills] = useState<string[]>([]);
+  const [loadingSkills, setLoadingSkills] = useState(false);
+  const [selectedSkill, setSelectedSkill] = useState("");
   const userDepartment = localStorage.getItem("user_department") || "";
   const navigate = useNavigate();
-  
+
   const token = localStorage.getItem("auth_token") || "";
   const userId = localStorage.getItem("user_id") || "";
 
@@ -62,6 +65,32 @@ export default function EmployeeDashboard() {
       fetchAnalytics();
     }
   }, [tickets]);
+  useEffect(() => {
+    fetchTickets();
+    fetchUserSkills();
+  }, []);
+
+  const fetchUserSkills = async () => {
+    setLoadingSkills(true);
+    try {
+      const response = await fetch("http://localhost:5000/api/tickets/skills/me", {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUserSkills(data.user.skills || []);
+      } else {
+        console.error("Failed to fetch user skills:", response.statusText);
+      }
+    } catch (error) {
+      console.error("Error fetching user skills:", error);
+    } finally {
+      setLoadingSkills(false);
+    }
+  };
 
   const fetchTickets = async () => {
     setLoadingTickets(true);
@@ -71,11 +100,11 @@ export default function EmployeeDashboard() {
           Authorization: token ? `Bearer ${token}` : "",
         },
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         const allTickets = data.tickets || data;
-        const employeeTickets = allTickets.filter((ticket: TicketData) => 
+        const employeeTickets = allTickets.filter((ticket: TicketData) =>
           ticket.department === userDepartment || ticket.createdBy?.id === userId
         );
         setTickets(employeeTickets);
@@ -92,44 +121,44 @@ export default function EmployeeDashboard() {
   };
 
   const fetchAnalytics = async () => {
-  setLoadingAnalytics(true);
-  try {
-    const response = await fetch(
-      "http://localhost:5000/api/tickets/analytics/tags?timeframe=30",
-      {
-        headers: {
-          Authorization: token ? `Bearer ${token}` : "",
-        },
+    setLoadingAnalytics(true);
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/tickets/analytics/tags?timeframe=30",
+        {
+          headers: {
+            Authorization: token ? `Bearer ${token}` : "",
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setAnalytics(data);
+      } else {
+        console.error("❌ API FAILED:", response.status, response.statusText);
+        if (tickets.length > 0) {
+          createFallbackTagAnalytics();
+        }
       }
-    );
-    
-    if (response.ok) {
-      const data = await response.json();
-      setAnalytics(data);
-    } else {
-      console.error("❌ API FAILED:", response.status, response.statusText);
+    } catch (error) {
+      console.error("❌ API ERROR:", error);
+      console.log("ERROR FALLBACK - tickets length:", tickets.length);
       if (tickets.length > 0) {
         createFallbackTagAnalytics();
       }
+    } finally {
+      setLoadingAnalytics(false);
     }
-  } catch (error) {
-    console.error("❌ API ERROR:", error);
-    console.log("ERROR FALLBACK - tickets length:", tickets.length);
-    if (tickets.length > 0) {
-      createFallbackTagAnalytics();
-    }
-  } finally {
-    setLoadingAnalytics(false);
-  }
-};
+  };
 
   // Create tag analytics from actual ticket data if API fails
   const createFallbackTagAnalytics = () => {
     const tagGroups: Record<string, TagAnalytics> = {};
-    
+
     tickets.forEach(ticket => {
       const ticketTags = ticket.tags && ticket.tags.length > 0 ? ticket.tags : ['Untagged'];
-      
+
       ticketTags.forEach(tag => {
         if (!tagGroups[tag]) {
           tagGroups[tag] = {
@@ -142,7 +171,7 @@ export default function EmployeeDashboard() {
             recentTickets: []
           };
         }
-        
+
         tagGroups[tag].totalTickets++;
 
         if (ticket.createdBy?.id === userId) {
@@ -209,7 +238,7 @@ export default function EmployeeDashboard() {
     const colors = [
       "bg-blue-100 text-blue-800",
       "bg-purple-100 text-purple-800",
-      "bg-green-100 text-green-800", 
+      "bg-green-100 text-green-800",
       "bg-yellow-100 text-yellow-800",
       "bg-pink-100 text-pink-800",
       "bg-indigo-100 text-indigo-800",
@@ -220,7 +249,7 @@ export default function EmployeeDashboard() {
       "bg-amber-100 text-amber-800",
       "bg-emerald-100 text-emerald-800"
     ];
-    
+
     if (tag === 'Untagged') return "bg-blue-100 text-blue-800";
     if (tag === 'Others') return "bg-gray-100 text-gray-800";
 
@@ -234,7 +263,7 @@ export default function EmployeeDashboard() {
       'bg-pink-500', 'bg-indigo-500', 'bg-red-500', 'bg-teal-500',
       'bg-orange-500', 'bg-cyan-500', 'bg-amber-500', 'bg-emerald-500'
     ];
-    
+
     if (tag === 'Others') return 'bg-gray-500';
     return colors[index % colors.length];
   };
@@ -242,18 +271,18 @@ export default function EmployeeDashboard() {
   // Process tags to show top N + Others
   const processTagsForDisplay = (tagData: Record<string, number>): [string, number][] => {
     const entries = Object.entries(tagData || {});
-    const sortedTags = entries.sort(([,a], [,b]) => b - a);
-    
+    const sortedTags = entries.sort(([, a], [, b]) => b - a);
+
     const MAX_TAGS = 6; // Show top 6 tags
-    
+
     if (sortedTags.length <= MAX_TAGS) {
       return sortedTags.map(([tag, count]) => [tag, Number(count)]);
     }
-    
+
     const topTags = sortedTags.slice(0, MAX_TAGS - 1);
     const otherTags = sortedTags.slice(MAX_TAGS - 1);
     const othersCount = otherTags.reduce((sum, [, count]) => sum + Number(count), 0);
-    
+
     return [...topTags.map(([tag, count]) => [tag, Number(count)] as [string, number]), ['Others', othersCount]];
   };
 
@@ -282,6 +311,111 @@ export default function EmployeeDashboard() {
           New Ticket
         </Button>
       </div>
+      <Card>
+        { /* employee Skills Section */}
+        <CardHeader>
+          <CardTitle>My Skills</CardTitle>
+          <CardDescription>Your registered skill set</CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          {loadingSkills ? (
+            <p>Loading skills...</p>
+          ) : (
+            <>
+              <div className="flex gap-2 mb-4">
+                <select
+                  value={selectedSkill}
+                  onChange={(e) => setSelectedSkill(e.target.value)}
+                  className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  <option value="">Select a skill</option>
+                  {[
+                    "troubleshooting",
+                    "networking",
+                    "operating systems",
+                    "hardware support",
+                    "software installation",
+                    "database basics",
+                    "ticketing systems",
+                    "customer support",
+                    "communication",
+                  ].map((skill) => (
+                    <option key={skill} value={skill}>
+                      {skill}
+                    </option>
+                  ))}
+                </select>
+
+                <Button
+                  onClick={async () => {
+                    if (!selectedSkill) return;
+                    const response = await fetch("http://localhost:5000/api/tickets/skills/add", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: token ? `Bearer ${token}` : "",
+                      },
+                      body: JSON.stringify({ skill: selectedSkill }),
+                    });
+                    if (response.ok) {
+                      const data = await response.json();
+                      setUserSkills(data.skills);
+                      setSelectedSkill("");
+                    }
+                  }}
+                  size="sm"
+                  className="bg-gradient-primary hover:shadow-glow transition-all duration-300"
+                >
+                  Add Skill
+                </Button>
+              </div>
+
+              {userSkills.length > 0 ? (
+                <div className="flex flex-wrap gap-3">
+                  {userSkills.map((skill) => (
+                    <div
+                      key={skill}
+                      className="relative group inline-flex items-center bg-blue-100 text-blue-900 text-base px-4 py-2 font-semibold rounded-lg transition-colors duration-200"
+                    >
+                      {skill}
+                      <button
+                        onClick={async () => {
+                          const response = await fetch("http://localhost:5000/api/tickets/skills/remove", {
+                            method: "DELETE",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Authorization: token ? `Bearer ${token}` : "",
+                            },
+                            body: JSON.stringify({ skill }),
+                          });
+                          if (response.ok) {
+                            const data = await response.json();
+                            setUserSkills(data.skills);
+                          }
+                        }}
+                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gray-300 text-gray-700 
+           text-[10px] flex items-center justify-center font-bold opacity-0 
+           group-hover:opacity-100 transition-all duration-200 hover:bg-gray-500 hover:text-white"
+
+
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-muted-foreground">No skills found</p>
+              )}
+
+
+            </>
+          )}
+        </CardContent>
+
+
+      </Card>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -293,8 +427,8 @@ export default function EmployeeDashboard() {
           <CardContent>
             <div className="text-2xl font-bold">{analytics?.summary.totalTickets || stats.total}</div>
             <p className="text-xs text-muted-foreground">
-              {analytics ? 
-                `${analytics.summary.myTickets} mine + ${analytics.summary.departmentTickets} others` : 
+              {analytics ?
+                `${analytics.summary.myTickets} mine + ${analytics.summary.departmentTickets} others` :
                 'Department + your created tickets (last 30 days)'
               }
             </p>
@@ -362,7 +496,7 @@ export default function EmployeeDashboard() {
                   ).map(([tagName, totalCount]: [string, number], index: number) => {
                     const originalTagData = analytics.tags.find(t => t.tag === tagName);
                     const isOthersCategory = tagName === 'Others';
-                    
+
                     return (
                       <div key={tagName} className="space-y-2">
                         <div className="flex justify-between items-center">
@@ -395,13 +529,13 @@ export default function EmployeeDashboard() {
                             }}
                           />
                         </div>
-                        
+
                         {/* Status breakdown badges */}
                         {!isOthersCategory && originalTagData && (
                           <div className="flex flex-wrap gap-1">
                             {Object.entries(originalTagData.statusBreakdown || {}).map(([status, count]) => (
-                              <Badge 
-                                key={status} 
+                              <Badge
+                                key={status}
                                 className={getStatusColor(status)}
                                 variant="secondary"
                               >
@@ -410,7 +544,7 @@ export default function EmployeeDashboard() {
                             ))}
                           </div>
                         )}
-                        
+
                         {isOthersCategory && (
                           <div className="text-xs text-muted-foreground">
                             Combined data from {analytics.tags.length - 5} less common tags
@@ -445,16 +579,16 @@ export default function EmployeeDashboard() {
                 {['urgent', 'high', 'medium', 'low'].map(priority => {
                   const total = analytics?.tags.reduce((sum, tag) => {
                     const priorityCount = tag.priorityBreakdown?.[priority] || 0;
-                    const myPortion = tag.myTickets > 0 ? 
+                    const myPortion = tag.myTickets > 0 ?
                       Math.round(priorityCount * (tag.myTickets / tag.totalTickets)) : 0;
                     return sum + myPortion;
                   }, 0) || 0;
-                  
+
                   if (total === 0) return null;
-                  
-                  const myTotalTickets = analytics?.summary?.myTickets  || 1;
+
+                  const myTotalTickets = analytics?.summary?.myTickets || 1;
                   const percentage = (total / myTotalTickets) * 100;
-                  
+
                   return (
                     <div key={priority} className="space-y-2">
                       <div className="flex justify-between items-center">
@@ -467,11 +601,10 @@ export default function EmployeeDashboard() {
                       </div>
                       <div className="w-full bg-muted rounded-full h-2">
                         <div
-                          className={`rounded-full h-2 transition-all duration-500 ${
-                            priority === 'urgent' ? 'bg-red-500' :
+                          className={`rounded-full h-2 transition-all duration-500 ${priority === 'urgent' ? 'bg-red-500' :
                             priority === 'high' ? 'bg-orange-500' :
-                            priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
-                          }`}
+                              priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
+                            }`}
                           style={{ width: `${percentage}%` }}
                         />
                       </div>
@@ -513,10 +646,10 @@ export default function EmployeeDashboard() {
                   const isCreatedByMe = ticket.createdBy?._id === userId;
                   const isAssignedToMe = ticket.assignedTo?._id === userId;
                   const canEdit = isCreatedByMe || isAssignedToMe;
-                  
+
                   return (
-                    <div 
-                      key={ticket._id} 
+                    <div
+                      key={ticket._id}
                       className="border rounded-lg p-4 hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex justify-between items-start mb-2">
@@ -528,12 +661,12 @@ export default function EmployeeDashboard() {
                             </Badge>
                           )}
                         </h4>
-                        
+
                         {/* Smart Single Button - Edit OR View Details */}
                         <div className="flex-shrink-0">
                           {canEdit ? (
-                            <Button 
-                              variant="outline" 
+                            <Button
+                              variant="outline"
                               size="sm"
                               className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200 hover:border-green-300"
                               onClick={() => navigate(`/dashboard/tickets/${ticket._id}`)}
@@ -554,20 +687,20 @@ export default function EmployeeDashboard() {
                           )}
                         </div>
                       </div>
-                      
+
                       <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
                         {ticket.description}
                       </p>
-                      
+
                       <div className="flex items-center justify-between">
                         <div className="flex gap-2">
-                          <Badge 
+                          <Badge
                             className={getStatusColor(ticket.status)}
                             variant="secondary"
                           >
                             {ticket.status.replace('_', ' ')}
                           </Badge>
-                          <Badge 
+                          <Badge
                             className={getPriorityColor(ticket.priority)}
                             variant="secondary"
                           >
@@ -579,7 +712,7 @@ export default function EmployeeDashboard() {
                             </Badge>
                           )}
                         </div>
-                        
+
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Calendar className="w-3 h-3" />
                           {new Date(ticket.createdAt).toLocaleDateString()}

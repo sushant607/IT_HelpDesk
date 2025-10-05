@@ -12,6 +12,7 @@ export interface RegisterRequest {
   password: string;
   role?: string;
   department: string;
+  skills: string[];
 }
 
 export interface AuthResponse {
@@ -22,6 +23,7 @@ export interface AuthResponse {
     email: string;
     role: string;
     department: string;
+    skills: string[];
   };
 }
 

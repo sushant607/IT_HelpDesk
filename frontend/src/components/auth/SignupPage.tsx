@@ -6,15 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { 
-  Loader2, 
-  UserPlus, 
-  Mail, 
-  Lock, 
-  User, 
-  Building, 
-  Eye, 
-  EyeOff, 
+import {
+  Loader2,
+  UserPlus,
+  Mail,
+  Lock,
+  User,
+  Building,
+  Eye,
+  EyeOff,
   Headphones,
   Rocket,
   Users,
@@ -34,11 +34,27 @@ interface SignupFormData {
   confirmPassword: string;
   department: string;
   role: string;
+  skills: string[];
 }
+// Skills dropdown list
+const SKILLS = [
+  "troubleshooting",
+  "networking",
+  "operating systems",
+  "hardware support",
+  "software installation",
+  "database basics",
+  "ticketing systems",
+  "customer support",
+  "communication"
+];
+
+// Add skills to formData state
+skills: []
 
 const DEPARTMENTS = [
   'support team A',
-  'software team', 
+  'software team',
   'network team',
   'infrastructure team',
   'hardware team',
@@ -59,24 +75,24 @@ const TeamIllustration = () => (
       <div className="w-48 h-48 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full shadow-2xl flex items-center justify-center animate-pulse">
         <Users className="w-20 h-20 text-white/80" />
       </div>
-      
+
       {/* Orbiting elements representing team members */}
       <div className="absolute -top-6 -left-6 w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center shadow-lg animate-bounce">
         <Monitor className="w-8 h-8 text-white" />
       </div>
-      
+
       <div className="absolute -top-6 -right-6 w-16 h-16 bg-green-500 rounded-full flex items-center justify-center shadow-lg animate-bounce delay-300">
         <Database className="w-8 h-8 text-white" />
       </div>
-      
+
       <div className="absolute -bottom-6 -left-6 w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center shadow-lg animate-bounce delay-500">
         <Network className="w-8 h-8 text-white" />
       </div>
-      
+
       <div className="absolute -bottom-6 -right-6 w-16 h-16 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg animate-bounce delay-700">
         <Rocket className="w-8 h-8 text-white" />
       </div>
-      
+
       {/* Connecting pulse */}
       <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
         <div className="w-3 h-3 bg-pink-400 rounded-full animate-ping"></div>
@@ -93,6 +109,7 @@ export default function SignupPage() {
     confirmPassword: "",
     department: "",
     role: "employee",
+    skills: []
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -162,6 +179,8 @@ export default function SignupPage() {
         password: formData.password,
         role: formData.role,
         department: formData.department,
+        skills: formData.skills
+
       };
 
       const response = await apiService.register(registerData);
@@ -174,7 +193,7 @@ export default function SignupPage() {
       localStorage.setItem("user_department", response.user.department);
       localStorage.setItem("user_id", response.user.id);
 
-      if(response){
+      if (response) {
         toast({
           title: "Account created successfully",
           description: `Welcome to IT Helpdesk, ${response.user.name}!`,
@@ -199,11 +218,11 @@ export default function SignupPage() {
         <div className="absolute bottom-40 right-20 w-32 h-32 bg-rose-200/10 rounded-full animate-pulse delay-2000"></div>
         <div className="absolute bottom-20 left-10 w-12 h-12 bg-indigo-200/10 rounded-full animate-pulse delay-500"></div>
       </div>
-      
+
       {/* Main container */}
       <div className="flex items-center justify-center min-h-screen p-4 relative z-10">
         <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-8 items-center">
-          
+
           {/* Left side - Branding & Illustration */}
           <div className="hidden lg:flex flex-col items-center justify-center space-y-6 p-8">
             {/* Brand header */}
@@ -290,7 +309,7 @@ export default function SignupPage() {
                   Join our IT support team today
                 </CardDescription>
               </CardHeader>
-              
+
               <CardContent>
                 {error && (
                   <Alert className="mb-4 border-red-200 bg-red-50">
@@ -340,8 +359,8 @@ export default function SignupPage() {
                       <Label htmlFor="department" className="text-gray-700">Department</Label>
                       <div className="relative">
                         <Building className="absolute left-3 top-3 w-4 h-4 text-gray-400 z-10" />
-                        <Select 
-                          value={formData.department} 
+                        <Select
+                          value={formData.department}
                           onValueChange={(value) => handleSelectChange('department', value)}
                           disabled={isLoading}
                         >
@@ -358,11 +377,62 @@ export default function SignupPage() {
                         </Select>
                       </div>
                     </div>
+                    {/* Skills field */}
+                    <div className="space-y-2">
+                      <Label htmlFor="skills">Skills</Label>
+                      <Select
+                        onValueChange={(value) => {
+                          if (!formData.skills.includes(value)) {
+                            setFormData((prev) => ({
+                              ...prev,
+                              skills: [...prev.skills, value],
+                            }));
+                          }
+                        }}
+                        disabled={isLoading}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a skill" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SKILLS.map((skill) => (
+                            <SelectItem key={skill} value={skill}>
+                              {skill.charAt(0).toUpperCase() + skill.slice(1)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      {/* Show selected skills as removable badges */}
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {formData.skills.map((skill) => (
+                          <div
+                            key={skill}
+                            className="flex items-center bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm"
+                          >
+                            {skill}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  skills: prev.skills.filter((s) => s !== skill),
+                                }))
+                              }
+                              className="ml-2 text-purple-500 hover:text-purple-700"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
 
                     <div className="space-y-2">
                       <Label htmlFor="role" className="text-gray-700">Role</Label>
-                      <Select 
-                        value={formData.role} 
+                      <Select
+                        value={formData.role}
                         onValueChange={(value) => handleSelectChange('role', value)}
                         disabled={isLoading}
                       >
@@ -468,3 +538,5 @@ export default function SignupPage() {
     </div>
   );
 }
+
+
